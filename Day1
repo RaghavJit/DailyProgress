@@ -1,51 +1,147 @@
-# Day1 
-11.23.2024
+# **Day 1 - Proxmox Installation and VM Migration**
 
-log
+**Date:** 11.23.2024
 
-7:00 login
-7:20 proxmox installed on desktop
-7:30 proxmox kerenal panic 
-7:45 proxmox version was changed and reinstalled proxmox now running 
+---
 
-followed this ()[]
-8:00 copied .ova from laptop to proxmox 
-9:00 extracted .ova to get vmdk 
-9:10 converted vmdk to qcow2 format
-9:20 created a test virtual machine
-9:30 importing qcow2 file complete
-9:35 started vm, did not boot
+## **Log**
 
-troubleshooting
-9:40 tried replacing machine types, firmware from seabios to ovme
-9:45 ovme requires efi storage, so created efi storage for importing
-10:00 created new vm with different configuration to hopefully match the iso
-10:15 imported the qcow2 file again and started the vm no luck
-10:30 on virtualbox created a vm and exported the appliance to ova
-10:40 uploaded iso file to proxmox and tried to create vm with it (works)
-10:50 appliance exported, and copied to proxmox
-11:15 ova file again extrated and process repeated, works
+### **Proxmox Installation**
+- **7:00 AM:** Logged in and started Proxmox setup.
+- **7:20 AM:** Installed Proxmox on the desktop.
+- **7:30 AM:** Encountered a kernel panic issue after the installation.
+- **7:45 AM:** Resolved the issue by changing the Proxmox version and reinstalling. Proxmox is now running.
 
-documentation
-qm create 
-qm set 
-qm start
-qm stop
-qm destroy
-qm list
+  **Steps Followed:**
+  1. Re-downloaded the Proxmox ISO for a different version.
+  2. Reinstalled Proxmox refered this:
+     - [Video](https://www.youtube.com/watch?v=ATd2fzgLN5g)
+     - [Docs](https://pve.proxmox.com/pve-docs/qm.1.html)
+     - [Article](https://credibledev.com/import-virtualbox-and-virt-manager-vms-to-proxmox/)
+     - [Helpful Reddit Thread](https://www.reddit.com/r/Proxmox/comments/195db77/importing_virtual_box_vm_to_proxmox/)
 
-what i learnet
-default configurations that vbox ship ova images needs to be known to properly import the vms
-    bios/uefi
-    chipset (machine)
-there might be alternate ways to migrate a machine to proxmox
+---
 
-tasks to be done for next 
-1. find proper way to export centos based vms from virtualbox
-2. find alternate ways for imgrating
+### **Virtual Machine Migration**
+- **8:00 AM:** Copied the `.ova` file from the laptop to the Proxmox server.
+- **9:00 AM:** Extracted the `.ova` file to obtain the `.vmdk` file.
+  ```bash
+  tar -xvf Chat.Scipy.In.ova
+  ```
+- **9:10 AM:** Converted the `.vmdk` file to `.qcow2` format using `qemu-img`:
+  ```bash
+  qemu-img convert -f vmdk -O qcow2 Chat.Scipy.In.vmdk test.chat.scipy.qcow2
+  ```
+- **9:20 AM:** Created a test VM using `qm create` can also be done in GUI (recommended):
+  ```bash
+  qm create 100 --name fossee --memory 4096 --cores 2 --net0 virtio,bridge=vmbr0
+  ```
+- **9:30 AM:** Imported the `.qcow2` file into the VM:
+  ```bash
+  qm importdisk 100 test.chat.scipy.qcow2 local-lvm
+  ```
+- **9:35 AM:** Started the VM:
+  ```bash
+  qm start 100
+  ```
+  **Issue:** VM did not boot successfully.
 
+---
 
+### **Troubleshooting**
+- **9:40 AM:** Attempted to replace machine types (`q35`, `i440fx`) and firmware (`SeaBIOS`, `OVMF`).
+- **9:45 AM:** Found that OVMF required an EFI disk, so created one:
+  ```bash
+  qm set 100 --efidisk0 local-qcow2:0,format=qcow2,efitype=4m
+  ```
+- **10:00 AM:** Created a new VM with modified configuration to match the source VM's settings:
+  ```bash
+  qm create 100 --name fossee --memory 4096 --cores 2 --net0 virtio,bridge=vmbr0
+  ```
+- **10:15 AM:** Re-imported the `.qcow2` file to the new VM:
+  ```bash
+  qm importdisk 100 test.chat.scipy.qcow2 local-lvm
+  ```
+- **10:30 AM:** Exported a test VM from VirtualBox back to an `.ova` and repeated the process.
+- **10:40 AM:** Uploaded an ISO file to Proxmox and used it to create a VM:
+  ```bash
+  qm create 100 --name ISOTestVM --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0 --cdrom /var/lib/vz/template/iso/centos.iso --disk 0,format=raw,size=32G
+  ```
+  **Result:** Successfully created and booted the VM from the ISO.
 
+- **10:50 AM:** Exported a new `.ova` file from VirtualBox, copied it to Proxmox, and repeated the migration process. This time it worked successfully.
 
+---
 
+## **Documentation**
 
+### **Key Commands Used**
+1. **Create a VM**:
+   ```bash
+   qm create <vmid> --name <vm_name> --memory <RAM_size> --cores <num_cores> --net0 virtio,bridge=vmbr0
+   ```
+   Example:
+   ```bash
+   qm create 100 --name TestVM --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0
+   ```
+
+2. **Import Disk**:
+   ```bash
+   qm importdisk <vmid> <path_to_disk> <storage_name>
+   ```
+   Example:
+   ```bash
+   qm importdisk 100 my_vm-disk.qcow2 local-lvm
+   ```
+
+3. **Set Disk Configuration**:
+   ```bash
+   qm set <vmid> --scsi0 <storage>:<disk_id>,format=raw
+   ```
+
+4. **Create EFI Disk** (for OVMF firmware):
+   ```bash
+   qm set <vmid> --efidisk0 <storage>:<disk_id>,format=qcow,efitype=4m
+   ```
+
+5. **Start the VM**:
+   ```bash
+   qm start <vmid>
+   ```
+
+6. **Stop the VM**:
+   ```bash
+   qm stop <vmid>
+   ```
+
+7. **Destroy the VM**:
+   ```bash
+   qm destroy <vmid>
+   ```
+
+8. **List VMs**:
+   ```bash
+   qm list
+   ```
+
+---
+
+## **Lessons Learned**
+1. **Default VirtualBox Settings for `.ova` Files**:
+   - VirtualBox OVAs often use specific configurations:
+     - BIOS/UEFI firmware
+     - Machine type (chipset: `i440fx` or `q35`)
+   - Ensure these are correctly set in Proxmox for successful migration.
+
+2. **Alternate VM Migration Strategies**:
+   - Export as `.ova` and adjust settings in Proxmox.
+   - Directly use `.iso` for creating a VM and configure it from scratch.
+
+3. **Importance of Configuration Matching**:
+   - Matching VM hardware settings (e.g., firmware, disk format, machine type) to the source environment is crucial.
+
+---
+
+## **Tasks for Tomorrow**
+1. Research a proper method for exporting CentOS-based VMs from VirtualBox for migration.
+2. Explore alternate ways to migrate VMs from VirtualBox to Proxmox (e.g., `qemu-img` conversion, direct import methods).
