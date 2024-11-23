@@ -1,0 +1,51 @@
+# Day1 
+11.23.2024
+
+log
+
+7:00 login
+7:20 proxmox installed on desktop
+7:30 proxmox kerenal panic 
+7:45 proxmox version was changed and reinstalled proxmox now running 
+
+followed this ()[]
+8:00 copied .ova from laptop to proxmox 
+9:00 extracted .ova to get vmdk 
+9:10 converted vmdk to qcow2 format
+9:20 created a test virtual machine
+9:30 importing qcow2 file complete
+9:35 started vm, did not boot
+
+troubleshooting
+9:40 tried replacing machine types, firmware from seabios to ovme
+9:45 ovme requires efi storage, so created efi storage for importing
+10:00 created new vm with different configuration to hopefully match the iso
+10:15 imported the qcow2 file again and started the vm no luck
+10:30 on virtualbox created a vm and exported the appliance to ova
+10:40 uploaded iso file to proxmox and tried to create vm with it (works)
+10:50 appliance exported, and copied to proxmox
+11:15 ova file again extrated and process repeated, works
+
+documentation
+qm create 
+qm set 
+qm start
+qm stop
+qm destroy
+qm list
+
+what i learnet
+default configurations that vbox ship ova images needs to be known to properly import the vms
+    bios/uefi
+    chipset (machine)
+there might be alternate ways to migrate a machine to proxmox
+
+tasks to be done for next 
+1. find proper way to export centos based vms from virtualbox
+2. find alternate ways for imgrating
+
+
+
+
+
+
