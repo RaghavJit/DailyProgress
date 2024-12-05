@@ -53,8 +53,6 @@ Example:
    ```
 - **Script Reference**: The script extracts the OVA to a user-specified folder using the `extractOVA` function. It prompts the user to confirm overwriting if a VMDK file already exists.
 
-Refer to **VM Management** section: [Extract OVA](#vm-management).
-
 ---
 
 ### 2. Disk Conversion to QCOW2  
@@ -65,8 +63,6 @@ Refer to **VM Management** section: [Extract OVA](#vm-management).
    qemu-img convert -f vmdk -O qcow2 <input-vmdk> <output-qcow2>
    ```
 - **Script Reference**: The `convertQCOW` function handles the conversion from VMDK to QCOW2, skipping this step if the input file is already in QCOW format.
-
-Refer to **Disk Management** section: [Convert Disk Format](#disk-management).
 
 ---
 
@@ -79,7 +75,7 @@ Refer to **Disk Management** section: [Convert Disk Format](#disk-management).
    ```
 - **Script Reference**: The `createStorage` function interacts with the user to either create a new storage or select an existing one using `fzf`.
 
-Refer to **Storage Management** section: [Create Storage](#storage-management).
+Refer to **Storage Management** section: [Create Storage](./ProxmoxCLI.md/#2-storage-management-commands).
 
 ---
 
@@ -92,7 +88,7 @@ Refer to **Storage Management** section: [Create Storage](#storage-management).
    ```
 - **UEFI vs SeaBIOS**: The script defaults to SeaBIOS for compatibility, though UEFI can be specified by adjusting VM options.
 
-Refer to **VM Management** section: [Create VM](#vm-management).
+Refer to **VM Management** section: [Create VM](./ProxmoxCLI.md/#1-vm-management-commands).
 
 ---
 
@@ -105,7 +101,7 @@ Refer to **VM Management** section: [Create VM](#vm-management).
    ```
 - **Script Reference**: The `attachStorage` function lists available disks from the storage and attaches the selected disk to the VM.
 
-Refer to **VM Management** section: [Attach Disk](#vm-management).
+Refer to **VM Management** section: [Attach Disk](./ProxmoxCLI.md/#4-set-storagedisk-for-a-vm).
 
 ---
 
@@ -113,7 +109,7 @@ Refer to **VM Management** section: [Attach Disk](#vm-management).
 
 The script offers cleanup options in case of failures, including deleting the extracted files, disks, and VMs. The `handleFailure` function prompts the user to confirm these actions.
 
-Refer to **Disk Management** section: [Delete Disk](#disk-management).
+Refer to **Disk Management** section: [Delete Disk](./ProxmoxCLI.md/#3-disk-management-commands).
 
 ---
 
