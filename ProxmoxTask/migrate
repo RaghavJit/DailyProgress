@@ -1,0 +1,211 @@
+#!/usr/bin/bash
+
+getInput() {
+    local temp
+    while [ -z "$temp" ]; do
+        read -p "$1" temp
+    done
+    echo $temp;
+} # function to handle user input, prevents script failure due to accidental press of 'enter'
+
+checkUsageAndFile(){
+    if [ ! -f "$FILE" ]; then
+        echo "!!! Error: File '$FILE' not found! !!!";
+        return 1;
+    fi
+
+    if [ -z "$FILE" ]; then
+        echo "::: Usage: [-v] <file> :::" # incorrect usage 
+        return 1;
+    fi
+
+    return 0;
+}
+
+extractOVA(){
+    local vmdk_exists;
+    local confirm
+
+    if [[ "$FILE" == *.qcow* ]]; then
+        return 0; # skip step if qcow file is supplied
+    fi
+
+    FOLDER=$(getInput ">>> Enter the name of the folder to extract into: ");
+    [ "$VERBOSE" -eq 1 ] && echo "::: Using $FOLDER :::";
+    mkdir -p "$FOLDER";
+    
+    vmdk_exists=$(find "$FOLDER" -name "*.vmdk" | wc -l);
+    if [ "$vmdk_exists" -gt 0 ]; then
+        read -p ">>> VMDK already exists. Do you want to override it? [y/N]: " confirm;
+        VMDK_FILE=$(find "$FOLDER" -name "*.vmdk");
+        [[ "$confirm" =~ ^[Yy]$ ]] || return 0;
+
+    fi
+
+    [ "$VERBOSE" -eq 1 ] && echo "::: Extracting OVA to $FOLDER :::";
+    rm -rf $FOLDER/*.vmdk;
+    tar -xf "$FILE" -C "$FOLDER";
+    [ "$VERBOSE" -eq 1 ] && echo "::: Extraction completed into folder $FOLDER :::";
+
+    VMDK_FILE=$(find "$FOLDER" -name "*.vmdk");
+
+    return 0;
+} # safely extracts ova file to a folder
+
+convertQCOW() {
+    if [[ "$FILE" == *.qcow* ]]; then
+        QCOW2_FILE="$FILE"; # skip step if qcow file is supplied
+        return 0;
+    else 
+        QCOW2_FILE="$FOLDER/migrate.qcow";
+        [ "$VERBOSE" -eq 1 ] && echo "::: Starting conversion to QCOW2 :::";
+    fi
+
+    qemu-img convert -f vmdk -O qcow "$VMDK_FILE" "$QCOW2_FILE";
+
+    [ $? -eq 0 ] && 
+    {([ "$VERBOSE" -eq 1 ] && echo "::: Conversion to QCOW2 completed :::";) && return 0;} || 
+    {([ "$VERBOSE" -eq 0 ] && echo "!!! Error: Conversion to QCOW2 failed !!!";) && return 1;} # this line returns status based on success of previous command, if verbose flag is set message is displayed
+} # converts vmdk to qcow 
+
+createStorage(){
+    local choose
+
+    read -p ">>> Do you want to create a new storage [y] or choose from the avalible storages [N]?: " choose
+    if [[ ! "$choose" =~ ^[Yy]$ ]]; then 
+        while true; do
+            STORAGE=$(pvesm status | tail -n +2 | awk '{print $1}' | fzf --prompt="Choose a storage: ")
+            if [ -n "$STORAGE" ]; then
+                ([ "$VERBOSE" -eq 1 ] && echo "::: Using storage $STORAGE :::";);
+                return 0;
+            fi
+        done
+    fi # pvesm gives a list of storages, after doing some manipulation on string, it's piped to fzf
+
+    [ "$VERBOSE" -eq 1 ] && echo "::: Creating Storage :::"
+    STORAGE=$(getInput ">>> Enter the name of storage: ") 
+    pvesm add lvmthin $STORAGE --vgname pve --thinpool data --content images # script can be modified to use user specified volume groups and thinpool
+
+    [ $? -eq 0 ] && 
+    {([ "$VERBOSE" -eq 1 ] && echo "::: Storage $STORAGE created :::";) && return 0;} ||
+    {([ "$VERBOSE" -eq 1 ] && echo "!!! Error: Failed to create $STORAGE !!!";) && return 1;}
+}
+
+createVM(){
+    [ "$VERBOSE" -eq 1 ] && echo "::: Creating VM :::"
+
+    while true; do
+        vm_name=$(getInput ">>> Enter VM name: ") 
+        cpu_cores=$(getInput ">>> Enter CPU Cores: ") 
+        memory_size=$(getInput ">>> Enter Memory (in MB): ") 
+
+        read -p ">>> Are you sure you entered the correct values? [Y/n]?: " choose
+        if [[ "$choose" =~ ^[Yy]?$ ]]; then 
+            qm create "$VM_ID" \
+                --name "$vm_name" \
+                --memory "$memory_size" \
+                --cores "$cpu_cores" \
+                --boot order=scsi0 \
+                --net0 virtio,bridge=vmbr0 \
+                --scsihw virtio-scsi-pci \
+                --ide2 none,media=cdrom \
+                --kvm 1  # script can be modified to create VM with custom options
+
+            [ $? -eq 0 ] && 
+            {([ "$VERBOSE" -eq 1 ] && echo "::: VM $vm_name with ID $VM_ID created :::";) && return 0;} ||
+            {([ "$VERBOSE" -eq 1 ] && echo "!!! Error: Failed to create VM !!!";) && return 1;}
+        fi
+    done
+} # created VM before adding disk to storage
+
+importQCOW2(){
+    [ "$VERBOSE" -eq 1 ] && echo "::: Importing QCOW2 file to $STORAGE :::"
+    qm importdisk $VM_ID "$QCOW2_FILE" $STORAGE --format=qcow2
+    
+    [ $? -eq 0 ] && 
+    {([ "$VERBOSE" -eq 1 ] && echo "::: Successfully imported $QCOW2_FILE to $STORAGE :::";) && return 0;} ||
+    {([ "$VERBOSE" -eq 1 ] && echo "!!! Error: Failed to import $QCOW2_FILE to $STORAGE !!!";) && return 1;}
+} # importing disk
+
+attachStorage(){
+    [ "$VERBOSE" -eq 1 ] && echo "::: Attaching Storage :::"
+    local diskInfo=$(pvesm list $STORAGE | tail -n +2 | fzf --prompt "Choose a disk: ")
+    local size=$(echo "$diskInfo" | awk '{print $4/1073741824}') # convertion from bytes to GB (be careful proxmox uses both GB and GiB)
+    DISK=$(echo $diskInfo | cut -d' ' -f1)
+
+    qm set $VM_ID --scsi0 "$DISK,size=$size"
+
+    [ $? -eq 0 ] && 
+    {([ "$VERBOSE" -eq 1 ] && echo "::: Added storage $STORAGE to $VM_ID :::";) && return 0;} ||
+    {([ "$VERBOSE" -eq 1 ] && echo "!!! Error: Failed to add storage $STORAGE to $VM_ID !!!";) && return 1;}
+} # set --scsi0 optio (scsi1, scsi2... can also be used)
+
+handleFailure(){
+    local choose
+
+    if [[ ! $FOLDER == "" ]]; then
+        read -p ">>> Do you want to delete $FOLDER [Y/n]?: " choose
+        if [[ "$choose" =~ ^[Yy]?$ ]]; then 
+            rm -rf $FOLDER;
+            [ $? -eq 0 ] && 
+            ([ "$VERBOSE" -eq 1 ] && echo "::: Deleted $FOLDER :::";) ||
+            ([ "$VERBOSE" -eq 1 ] && echo "!!! Error: Failed to delete $FOLDER !!!";)
+        fi
+    fi
+
+    if qm list | grep -q $VM_ID >/dev/null 2>&1; then
+        read -p ">>> Do you want to delete the VM $VM_ID [Y/n]?: " choose
+        if [[ "$choose" =~ ^[Yy]?$ ]]; then 
+            qm stop $VM_ID;
+            qm set $VM_ID --scsi0 none;
+            qm destroy $VM_ID; 
+            [ $? -eq 0 ] && 
+            ([ "$VERBOSE" -eq 1 ] && echo "::: Deleted VM $VM_ID:::";) ||
+            ([ "$VERBOSE" -eq 1 ] && echo "!!! Error: Failed to delete VM $VM_ID !!!";)
+        fi
+    fi
+
+    read -p ">>> Do you want to delete the disk $DISK [Y/n]?: " choose
+    if [[ "$choose" =~ ^[Yy]?$ ]]; then 
+        pvesm free $DISK;
+        [ $? -eq 0 ] && 
+        ([ "$VERBOSE" -eq 1 ] && echo "::: Deleted disk $DISK :::";) ||
+        ([ "$VERBOSE" -eq 1 ] && echo "!!! Error: Failed to delete DISK $DISK !!!";)
+    fi
+} # cleanup function only executes when script fails
+
+VERBOSE=0;
+FILE="";
+FOLDER="";
+VMDK_FILE="";
+QCOW2_FILE="";
+STORAGE="";
+DISK="";
+VM_ID=$(pvesh get /cluster/nextid);
+
+main(){
+
+    if [[ "$1" == "-v" ]]; then
+        VERBOSE=1
+        shift
+    fi
+    FILE=$1
+
+    {
+        checkUsageAndFile &&
+        extractOVA &&
+        convertQCOW &&
+        createStorage &&
+        createVM &&
+        importQCOW2 &&
+        attachStorage &&   
+        echo "::: Operation complete :::";
+    } || {
+        echo "!!! Operation Failed !!!"; 
+        handleFailure
+    }
+
+    # functions execute one after other, if any function fails, it returns non zero status, which stops execution of next functions and executes handlFailure
+}
+
+main "$@"

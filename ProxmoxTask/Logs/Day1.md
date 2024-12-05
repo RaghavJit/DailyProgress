@@ -1,6 +1,6 @@
 # **Day 1 - Proxmox Installation and VM Migration**
 
-**Date:** 11.23.2024
+**Date:** 24.11.2024
 
 ---
 
@@ -136,10 +136,6 @@
 2. **Alternate VM Migration Strategies**:
    - Export as `.ova` and adjust settings in Proxmox.
    - Directly use `.iso` for creating a VM and configure it from scratch.
-
-3. **Importance of Configuration Matching**:
-   - Matching VM hardware settings (e.g., firmware, disk format, machine type) to the source environment is crucial.
-
 ---
 
 ## **Tasks for Tomorrow**

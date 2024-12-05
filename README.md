@@ -1,3 +1,4 @@
 # Daily Report
 
-[Day1](./Day1.md)
+## Tasks Completed
+1. Migrated VirtualBox virtual machines to Proxmox. [[Docs](./ProxmoxTask/Task.md)]
