@@ -7,10 +7,10 @@
 ## **Log**
 
 ### **Proxmox Installation**
-- **7:00 AM:** Logged in and started Proxmox setup.
-- **7:20 AM:** Installed Proxmox on the desktop.
-- **7:30 AM:** Encountered a kernel panic issue after the installation.
-- **7:45 AM:** Resolved the issue by changing the Proxmox version and reinstalling. Proxmox is now running.
+- **7:00 PM:** Logged in and started Proxmox setup.
+- **7:20 PM:** Installed Proxmox on the desktop.
+- **7:30 PM:** Encountered a kernel panic issue after the installation.
+- **7:45 PM:** Resolved the issue by changing the Proxmox version and reinstalling. Proxmox is now running.
 
   **Steps Followed:**
   1. Re-downloaded the Proxmox ISO for a different version.
@@ -23,24 +23,24 @@
 ---
 
 ### **Virtual Machine Migration**
-- **8:00 AM:** Copied the `.ova` file from the laptop to the Proxmox server.
-- **9:00 AM:** Extracted the `.ova` file to obtain the `.vmdk` file.
+- **8:00 PM:** Copied the `.ova` file from the laptop to the Proxmox server.
+- **9:00 PM:** Extracted the `.ova` file to obtain the `.vmdk` file.
   ```bash
   tar -xvf Chat.Scipy.In.ova
   ```
-- **9:10 AM:** Converted the `.vmdk` file to `.qcow2` format using `qemu-img`:
+- **9:10 PM:** Converted the `.vmdk` file to `.qcow2` format using `qemu-img`:
   ```bash
   qemu-img convert -f vmdk -O qcow2 Chat.Scipy.In.vmdk test.chat.scipy.qcow2
   ```
-- **9:20 AM:** Created a test VM using `qm create` can also be done in GUI (recommended):
+- **9:20 PM:** Created a test VM using `qm create` can also be done in GUI (recommended):
   ```bash
   qm create 100 --name fossee --memory 4096 --cores 2 --net0 virtio,bridge=vmbr0
   ```
-- **9:30 AM:** Imported the `.qcow2` file into the VM:
+- **9:30 PM:** Imported the `.qcow2` file into the VM:
   ```bash
   qm importdisk 100 test.chat.scipy.qcow2 local-lvm
   ```
-- **9:35 AM:** Started the VM:
+- **9:35 PM:** Started the VM:
   ```bash
   qm start 100
   ```
@@ -49,27 +49,27 @@
 ---
 
 ### **Troubleshooting**
-- **9:40 AM:** Attempted to replace machine types (`q35`, `i440fx`) and firmware (`SeaBIOS`, `OVMF`).
-- **9:45 AM:** Found that OVMF required an EFI disk, so created one:
+- **9:40 PM:** Attempted to replace machine types (`q35`, `i440fx`) and firmware (`SeaBIOS`, `OVMF`).
+- **9:45 PM:** Found that OVMF required an EFI disk, so created one:
   ```bash
   qm set 100 --efidisk0 local-qcow2:0,format=qcow2,efitype=4m
   ```
-- **10:00 AM:** Created a new VM with modified configuration to match the source VM's settings:
+- **10:00 PM:** Created a new VM with modified configuration to match the source VM's settings:
   ```bash
   qm create 100 --name fossee --memory 4096 --cores 2 --net0 virtio,bridge=vmbr0
   ```
-- **10:15 AM:** Re-imported the `.qcow2` file to the new VM:
+- **10:15 PM:** Re-imported the `.qcow2` file to the new VM:
   ```bash
   qm importdisk 100 test.chat.scipy.qcow2 local-lvm
   ```
-- **10:30 AM:** Exported a test VM from VirtualBox back to an `.ova` and repeated the process.
-- **10:40 AM:** Uploaded an ISO file to Proxmox and used it to create a VM:
+- **10:30 PM:** Exported a test VM from VirtualBox back to an `.ova` and repeated the process.
+- **10:40 PM:** Uploaded an ISO file to Proxmox and used it to create a VM:
   ```bash
   qm create 100 --name ISOTestVM --memory 2048 --cores 2 --net0 virtio,bridge=vmbr0 --cdrom /var/lib/vz/template/iso/centos.iso --disk 0,format=raw,size=32G
   ```
   **Result:** Successfully created and booted the VM from the ISO.
 
-- **10:50 AM:** Exported a new `.ova` file from VirtualBox, copied it to Proxmox, and repeated the migration process. This time it worked successfully.
+- **10:50 PM:** Exported a new `.ova` file from VirtualBox, copied it to Proxmox, and repeated the migration process. This time it worked successfully.
 
 ---
 
@@ -78,7 +78,7 @@
 ### **Key Commands Used**
 1. **Create a VM**:
    ```bash
-   qm create <vmid> --name <vm_name> --memory <RAM_size> --cores <num_cores> --net0 virtio,bridge=vmbr0
+   qm create <vmid> --name <vm_name> --memory <RPM_size> --cores <num_cores> --net0 virtio,bridge=vmbr0
    ```
    Example:
    ```bash
