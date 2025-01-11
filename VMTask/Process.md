@@ -54,7 +54,7 @@
    DNS1: 2001:4860:4860::8888
    DNS2: 2606:4700:4700::1111
    ```
-   Using [ip]() command
+   Using [ip](https://man7.org/linux/man-pages/man8/ip.8.html) command
    ```
    sudo ip -6 addr add 2a01:4f9:3080:2d4d::5/64 dev enp0s8
 

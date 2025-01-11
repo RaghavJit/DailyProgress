@@ -1,6 +1,6 @@
 # IP white listing
 
-**Firewalld rules applied:** FOSSEE uses [firewalld]() as it's firewall, it's also the default firewall for RHEL based systems. The following rules were applied to the host machine
+**Firewalld rules applied:** FOSSEE uses [firewalld](https://firewalld.org/documentation/man-pages/firewall-cmd.html) as it's firewall, it's also the default firewall for RHEL based systems. The following rules were applied to the host machine
 
 ---
 
@@ -97,7 +97,7 @@ This show, the firewall configuration we did was blocking the incoming traffic o
 
     Both have failed to give the required results, now the connection to VM was not only blocked but **enitery blocked.**
 
-    To get the system in the older state I had to do [reinstall everything](./Reinstall.md)
+    To get the system in the older state I had to do reinstall everything.
 
 4. **Chaning gateway**
     Idea was to add the gateway of host as the gateway of VM. Since the interface of VM is in bridged mode network packets will be routed via this common gateway.
