@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scilab-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scilab-app
+  template:
+    metadata:
+      labels:
+        app: scilab-app
+    spec:
+      containers:
+        - name: scilab
+          image: localhost/scilab-app
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+
