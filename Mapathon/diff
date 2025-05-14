@@ -1,0 +1,40 @@
+diff --git a/mapathon/settings.py b/mapathon/settings.py
+index dba4705..42dab89 100755
+--- a/mapathon/settings.py
++++ b/mapathon/settings.py
+@@ -78,12 +78,13 @@ WSGI_APPLICATION = 'mapathon.wsgi.application'
+ 
+ DATABASES = {
+     'default': {
+-        'ENGINE': 'django.db.backends.mysql',
++        #'ENGINE': 'django.db.backends.mysql',
+         # Or path to database file if using sqlite3.
+         'NAME': DB_NAME_DEFAULT,
+-        'USER': DB_USER_DEFAULT,
+-        'PASSWORD': DB_PASS_DEFAULT,
+-        'HOST': DB_HOST_DEFAULT,
++        #'USER': DB_USER_DEFAULT,
++        #'PASSWORD': DB_PASS_DEFAULT,
++        'ENGINE': 'django.db.backends.sqlite3'
++        #'HOST': DB_HOST_DEFAULT,
+     }
+ }
+ 
+@@ -125,12 +126,12 @@ USE_TZ = True
+ # https://docs.djangoproject.com/en/2.1/howto/static-files/
+ STATIC_URL = '/static/'
+ 
+-STATICFILES_DIRS = [
+-    os.path.join(BASE_DIR, "static"),
+-    '/../static/',
+-]
++#STATICFILES_DIRS = [
++#    os.path.join(BASE_DIR, "static"),
++#    '/../static/',
++#]
+ 
+-#STATIC_ROOT = os.path.join(BASE_DIR, "static")
++STATIC_ROOT = os.path.join(BASE_DIR, "static/")
+ 
+ MEDIA_ROOT = os.path.join(BASE_DIR)
+ MEDIA_URL = "/"
