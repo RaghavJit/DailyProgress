@@ -1,0 +1,14 @@
+[Unit]
+Description=uWSGI Emperor. Written by Raghavjit Rana to run mapathon-django websites.
+After=network.target
+
+[Service]
+User=root
+ExecStart=/sbin/uwsgi --emperor /etc/uwsgi.d/
+Restart=always
+KillSignal=SIGQUIT
+Type=notify
+NotifyAccess=all
+
+[Install]
+WantedBy=multi-user.target

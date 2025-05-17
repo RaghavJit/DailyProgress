@@ -1,5 +1,5 @@
 upstream django {
-    server unix:///var/run/file.sock;
+    server unix:///run/uwsgi/file.sock;
 }
 server {
     listen      80;
