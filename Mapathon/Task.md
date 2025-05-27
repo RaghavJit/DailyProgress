@@ -140,3 +140,10 @@ sudo semodule -i mynginx.pp
 
 ### Conclusion
 The sites were hosted using UWSGI-Nginx and SystemD service was configured to run the sites.
+
+## Post Prodcution Issues
+List of issues faced after going in Prodcution.
+
+### Pages could not be created
+**ISSUE**: Creating page involves writing sqlite file, but when attempting the same, it threw 'operation not permitted error'.
+**FIX**: Chanaged owenership of all repo files to raghav:nginx, and privilages to chmod 774 for both sqlite file and the parent dir.

@@ -8,7 +8,7 @@
 1. Assigning IPV6 static to VirtualBox VM. [[Docs](./VMTask/Task.md)]
 
 
-[Final report] (pdf))(./FOSSEE_WinterInternship2024_Raghavjit.pdf)
+[Final report (pdf)](./FOSSEE_WinterInternship2024_Raghavjit.pdf)
 
 ## Regular Internship tasks
 1. Scilab containerization and hosting with MiniKube [[Docs](./Scilab-MiniKube/Task.md/)]
