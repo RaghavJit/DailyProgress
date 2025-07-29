@@ -96,12 +96,30 @@ mysql -h <ip you obtained> -u <username> -p <database name>
 To avoid all the labour of performing the above steps for multiple sites this bash script can be employed. This reads a CSV file and builds images with specified parameters.
 
 ```
-cat sites.csv | awk -F',' '{system("podman build -t "$3" --build-arg REPO="$2" --build-arg ENV_DB="$4" --build-arg ENV_USR="$5" --build-arg ENV_PSWD="$6" --build-arg ENV_HOST="$7)}'
+cat sites.csv | awk -F',' '{
+    system(
+        "podman build -t " $3
+        " --build-arg REPO=" $2
+        " --build-arg ENV_DB=" $4
+        " --build-arg ENV_USR=" $5
+        " --build-arg ENV_PSWD=" $6
+        " --build-arg ENV_HOST=" $7
+    )
+}'
 ```
 
 Similarly the sites can be run using
 ```
-cat sites.csv | awk -F',' '{system("podman run -dit --network=slirp4netns:allow_host_loopback=true --cap-add=NET_RAW -p "$1":80 --name="$3" localhost/"$3":latest)}'
+cat sites.csv | awk -F',' '{
+    system(
+        "podman run -dit"
+        " --network=slirp4netns:allow_host_loopback=true"
+        " --cap-add=NET_RAW"
+        " -p " $1 ":80"
+        " --name=" $3
+        " localhost/" $3 ":latest"
+    )
+}'
 ```
 
 *This is however not failsafe and will make debugging harder.
