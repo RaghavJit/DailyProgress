@@ -1,0 +1,219 @@
+#!/bin/bash
+
+testInput() {
+    
+    local user_exists confirm 
+
+    if [[ "$SITE_NAME" != "${SITE_NAME,,}" ]]; then
+        echo "Error: Site name must be lowercase only."
+        exit 1
+    fi
+
+    if [[ ! -f "$SITE_DB_DUMP" ]]; then
+        echo "Error: SQL dump file '$SITE_DB_DUMP' does not exist."
+        exit 1
+    fi
+
+    if ! sudo mysql -u root -p"$ROOTPASS" -e "SELECT 1;" &>/dev/null; then
+        echo "Error: Invalid MySQL root password or MySQL server not running."
+        echo "Try running as root"
+        exit 1
+    fi
+
+
+    user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'")
+
+    if [[ "$user_exists" -ne 0 ]]; then
+        echo "Alert: MySQL user '$SITE_DB_USERNAME' already exists."
+        read -r -p "Do you wish to use this username? (y/n): " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            echo "Going ahead with $SITE_DB_USERNAME..."
+            return 0;
+        else
+            exit 1
+        fi
+    fi
+}
+
+getInput() {
+    local tmp_rootpass
+    local tmp_site_db_username
+    local tmp_site_db_name
+    local tmp_site_db_dump
+    local tmp_site_name
+    local confirm
+
+    while true; do
+        read -s -p "Enter MySQL root password: " tmp_rootpass
+        echo
+        echo "!! Kindly use lowercase for naming !!"
+        read -r -p "Enter name of the site: " tmp_site_name
+        read -r -p "Enter name of site database: " tmp_site_db_name
+        read -r -p "Enter database username you wish to use: " tmp_site_db_username
+        read -r -p "Enter path to SQL dumpfile for site: " tmp_site_db_dump
+        echo
+
+        echo "Summary of entered information:"
+        echo "Site Name        : $tmp_site_name"
+        echo "Database Name    : $tmp_site_db_name"
+        echo "Database Username: $tmp_site_db_username"
+        echo "SQL Dump File    : $tmp_site_db_dump"
+        echo
+
+        read -r -p "Is this information correct? (y/n): " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            ROOTPASS="$tmp_rootpass"
+            SITE_NAME="$tmp_site_name"
+            SITE_DB_USERNAME="$tmp_site_db_username"
+            SITE_DB_DUMP="$tmp_site_db_dump"
+            SITE_DB_NAME="${tmp_site_db_name}_$(date +%Y_%m_%d)"
+            SITE_DB_PASSWD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 35)
+            echo "Confirmed. Continuing..."
+            break
+        else
+            echo "Trying again..."
+            echo
+        fi
+    done
+
+    testInput &&
+    echo "Config passed input validation"
+
+    return 0
+}
+
+updateJSON() {
+    jq --arg site "$SITE_NAME" \
+       --arg db "$SITE_DB_NAME" \
+       --arg user "$SITE_DB_USERNAME" \
+       --arg pass "$SITE_DB_PASSWD" \
+       'map(
+         if .SITE_NAME == $site then
+           . + {
+             "SITE_DB_NAME": $db,
+             "SITE_DB_USERNAME": $user,
+             "SITE_DB_PASSWD": $pass
+           }
+         else .
+         end
+       )' sites.json > tmp && mv tmp sites.json
+
+    echo "Config saved to sites.json"
+    
+    return 0;
+}
+
+createUserAndDB() {
+    local db_exists
+    db_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SHOW DATABASES LIKE '$SITE_DB_NAME'")
+    
+    if [ "$db_exists" == "$SITE_DB_NAME" ]; then
+        echo "Database '$SITE_DB_NAME' already exists. Skipping creation."
+    else
+        echo "Creating database '$SITE_DB_NAME' and user '$SITE_DB_USERNAME'..."
+
+        sudo mysql -u root -p"$ROOTPASS" <<EOF
+CREATE DATABASE \`$SITE_DB_NAME\`;
+CREATE USER '$SITE_DB_USERNAME'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
+GRANT ALL PRIVILEGES ON \`$SITE_DB_NAME\`.* TO '$SITE_DB_USERNAME'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+    fi
+
+    return 0
+}
+
+importDump(){
+    sudo mysql -u root -p"$ROOTPASS" $SITE_DB_NAME < $SITE_DB_DUMP 
+    return 0;
+}
+
+createImage() {
+    local port repo db_name db_user db_pass confirm
+    local lines
+
+    echo "SITE_NAME: $SITE_NAME"
+
+    mapfile -t lines < <(
+        jq -r --arg site_name "$SITE_NAME" '
+          .[] | select(.SITE_NAME == $site_name) |
+          "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)"
+        ' sites.json
+    )
+
+    if [ "${#lines[@]}" -ne 5 ]; then
+        echo "Error: Could not extract all 5 fields for $SITE_NAME"
+        return 1
+    fi
+
+    port="${lines[0]}"
+    repo="${lines[1]}"
+    db_name="${lines[2]}"
+    db_user="${lines[3]}"
+    db_pass="${lines[4]}"
+
+    echo "Building Podman image with:"
+    echo "Site Name        : $SITE_NAME"
+    echo "Database Name    : $db_name"
+    echo "Database Username: $db_user"
+    echo "Repository       : $repo"
+    echo
+
+    read -p "Proceed with image build? (y/N): " confirm
+    case "$confirm" in
+        [yY][eE][sS]|[yY]) ;;
+        *) echo "Aborted by user."; return 1 ;;
+    esac
+
+    if podman build -t "${SITE_NAME}_image" . \
+        --build-arg REPO="$repo" \
+        --build-arg ENV_DB="$db_name" \
+        --build-arg ENV_USR="$db_user" \
+        --build-arg ENV_PSWD="$db_pass" \
+        --build-arg ENV_HOST="10.0.2.2"; then
+        return 0
+    else
+        echo "Error: Failed to build Podman image for site '$SITE_NAME'" >&2
+        exit 1
+    fi
+}
+
+runContainer() {
+    local port
+
+    port=$(jq -r --arg SITE_NAME "$SITE_NAME" '
+        .[] | select(.SITE_NAME == $SITE_NAME) | .PORT
+    ' sites.json)
+
+    podman run -dit \
+        --network=slirp4netns:allow_host_loopback=true \
+        --cap-add=NET_RAW \
+        -p "$port":80 \
+        --name="${SITE_NAME}_container" \
+        localhost/"${SITE_NAME}_image":latest
+
+    return 0;
+}
+
+handleFailure() {
+    echo "Error occurred. Check input and try again."
+    exit 1
+}
+
+main() {
+    {
+        getInput &&
+        updateJSON &&
+        createUserAndDB &&
+        importDump &&
+        createImage && 
+        runContainer &&
+        echo "::: Operation complete :::"
+    } || {
+        echo "!!! Operation Failed !!!"
+        handleFailure
+    }
+}
+
+main
+
