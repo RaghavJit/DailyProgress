@@ -43,6 +43,11 @@ testInput() {
 }
 
 getInput() {
+
+    if [[ DB_CONFIG -eq 1 ]]; then
+        return 0;
+    fi
+
     local tmp_rootpass
     local tmp_site_db_username
     local tmp_site_db_name
@@ -90,6 +95,11 @@ getInput() {
 }
 
 updateJSON() {
+
+    if [[ DB_CONFIG -eq 1 ]]; then
+        return 0;
+    fi
+
     jq --arg site "$SITE_NAME" \
        --arg db "$SITE_DB_NAME" \
        --arg user "$SITE_DB_USERNAME" \
@@ -111,6 +121,11 @@ updateJSON() {
 }
 
 createUserAndDB() {
+
+    if [[ DB_CONFIG -eq 1 ]]; then
+        return 0;
+    fi
+
     local db_exists
     db_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SHOW DATABASES LIKE '$SITE_DB_NAME'" 2> >(grep -v "Using a password on the command line" >&2))
 
@@ -131,6 +146,11 @@ EOF
 }
 
 importDump() {
+
+    if [[ DB_CONFIG -eq 1 ]]; then
+        return 0;
+    fi
+
     echo "Importing ${SITE_DB_DUMP} to ${SITE_DB_NAME}"
 
     sudo mysql -u root -p"$ROOTPASS" "$SITE_DB_NAME" < "$SITE_DB_DUMP" 2> >(grep -v "Using a password on the command line" >&2)
@@ -240,7 +260,23 @@ EOF
     fi
 }
 
+PORT=""
+REPO=""
+SITE_NAME=""
+SITE_DB_NAME=""
+SITE_DB_USERNAME=""
+SITE_DB_PASSWD=""
+DB_CONFIG=""
+
 main() {
+
+    if [[ $1 == "-d" ]]; then
+        DB_CONFIG=1
+        shift
+    fi
+
+    SITE_NAME=$1
+
     {
         getInput &&
         updateJSON &&
@@ -255,5 +291,5 @@ main() {
     }
 }
 
-main
+main "$@"
 
