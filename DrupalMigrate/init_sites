@@ -1,11 +1,15 @@
 #!/bin/bash
 
 testInput() {
-    
-    local user_exists confirm 
+    local user_exists confirm
 
-    if [[ "$SITE_NAME" != "${SITE_NAME,,}" ]]; then
-        echo "Error: Site name must be lowercase only."
+    if [[ "$SITE_NAME" != "${SITE_NAME,,}" || "$SITE_NAME" =~ [[:space:]] ]]; then
+        echo "Error: Site name must be lowercase only with no spaces."
+        exit 1
+    fi
+
+    if [[ "$SITE_DB_NAME" != "${SITE_DB_NAME,,}" || "$SITE_DB_NAME" =~ [[:space:]] ]]; then
+        echo "Error: DB name must be lowercase only with no spaces."
         exit 1
     fi
 
@@ -14,21 +18,24 @@ testInput() {
         exit 1
     fi
 
-    if ! sudo mysql -u root -p"$ROOTPASS" -e "SELECT 1;" &>/dev/null; then
-        echo "Error: Invalid MySQL root password or MySQL server not running."
-        echo "Try running as root"
+    if [[ "$SITE_DB_USERNAME" != "${SITE_DB_USERNAME,,}" || "$SITE_DB_USERNAME" =~ [[:space:]] ]]; then
+        echo "Error: Database username must be lowercase only with no spaces."
         exit 1
     fi
 
+    if ! sudo mysql -u root -p"$ROOTPASS" -e "SELECT 1;" 2> >(grep -v "Using a password on the command line" >&2); then
+        echo "Error: Invalid MySQL root password or MySQL server not running."
+        exit 1
+    fi
 
-    user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'")
+    user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'" 2> >(grep -v "Using a password on the command line" >&2))
 
     if [[ "$user_exists" -ne 0 ]]; then
         echo "Alert: MySQL user '$SITE_DB_USERNAME' already exists."
         read -r -p "Do you wish to use this username? (y/n): " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             echo "Going ahead with $SITE_DB_USERNAME..."
-            return 0;
+            return 0
         else
             exit 1
         fi
@@ -46,7 +53,7 @@ getInput() {
     while true; do
         read -s -p "Enter MySQL root password: " tmp_rootpass
         echo
-        echo "!! Kindly use lowercase for naming !!"
+        echo "!! Kindly use lowercase for naming and don't include white spaces !!"
         read -r -p "Enter name of the site: " tmp_site_name
         read -r -p "Enter name of site database: " tmp_site_db_name
         read -r -p "Enter database username you wish to use: " tmp_site_db_username
@@ -105,14 +112,14 @@ updateJSON() {
 
 createUserAndDB() {
     local db_exists
-    db_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SHOW DATABASES LIKE '$SITE_DB_NAME'")
-    
-    if [ "$db_exists" == "$SITE_DB_NAME" ]; then
+    db_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SHOW DATABASES LIKE '$SITE_DB_NAME'" 2> >(grep -v "Using a password on the command line" >&2))
+
+    if [[ "$db_exists" == "$SITE_DB_NAME" ]]; then
         echo "Database '$SITE_DB_NAME' already exists. Skipping creation."
     else
         echo "Creating database '$SITE_DB_NAME' and user '$SITE_DB_USERNAME'..."
 
-        sudo mysql -u root -p"$ROOTPASS" <<EOF
+        sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
 CREATE DATABASE \`$SITE_DB_NAME\`;
 CREATE USER '$SITE_DB_USERNAME'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
 GRANT ALL PRIVILEGES ON \`$SITE_DB_NAME\`.* TO '$SITE_DB_USERNAME'@'localhost';
@@ -123,9 +130,11 @@ EOF
     return 0
 }
 
-importDump(){
-    sudo mysql -u root -p"$ROOTPASS" $SITE_DB_NAME < $SITE_DB_DUMP 
-    return 0;
+importDump() {
+    echo "Importing ${SITE_DB_DUMP} to ${SITE_DB_NAME}"
+
+    sudo mysql -u root -p"$ROOTPASS" "$SITE_DB_NAME" < "$SITE_DB_DUMP" 2> >(grep -v "Using a password on the command line" >&2)
+    return 0
 }
 
 createImage() {
@@ -197,7 +206,38 @@ runContainer() {
 
 handleFailure() {
     echo "Error occurred. Check input and try again."
-    exit 1
+    read -p "Would you like to undo the changes made by script? (y/N): " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        podman image rm "${SITE_NAME}_image"
+        podman container stop "${SITE_NAME}_container"
+        podman container rm "${SITE_NAME}_container"
+
+        sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
+DROP DATABASE \`$SITE_DB_NAME\`;
+DROP USER '$SITE_DB_USERNAME'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+
+        jq --arg site "$SITE_NAME" \
+           --arg db "" \
+           --arg user "" \
+           --arg pass "" \
+           'map(
+             if .SITE_NAME == $site then
+               . + {
+                 "SITE_DB_NAME": $db,
+                 "SITE_DB_USERNAME": $user,
+                 "SITE_DB_PASSWD": $pass
+               }
+             else .
+             end
+           )' sites.json > tmp && mv tmp sites.json
+
+        echo "Undo complete. Exiting."
+        exit 1
+    else
+        echo "Continuing without undo."
+    fi
 }
 
 main() {
