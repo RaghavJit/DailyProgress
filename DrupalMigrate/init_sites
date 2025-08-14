@@ -35,6 +35,9 @@ testInput() {
         read -r -p "Do you wish to use this username? (y/n): " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             echo "Going ahead with $SITE_DB_USERNAME..."
+            read -r -p "Enter the password of the user:" SITE_DB_PASSWD
+            echo
+
             return 0
         else
             exit 1
@@ -79,7 +82,8 @@ getInput() {
             SITE_DB_USERNAME="$tmp_site_db_username"
             SITE_DB_DUMP="$tmp_site_db_dump"
             SITE_DB_NAME="${tmp_site_db_name}_$(date +%Y_%m_%d)"
-            SITE_DB_PASSWD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 35)
+            SITE_DB_PASSWD=$(echo "$(tr -dc 'A-Z' </dev/urandom | head -c 1)$(tr -dc 'a-z' </dev/urandom | head -c 1)$(tr -dc '0-9' </dev/urandom | head -c 1)$(tr -dc '!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 1)$(tr -dc 'A-Za-z0-9!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 31)" | fold -w1 | shuf | tr -d '\n')
+
             echo "Confirmed. Continuing..."
             break
         else
@@ -157,6 +161,28 @@ importDump() {
     return 0
 }
 
+createVolume() {
+    local confirm
+    local custom_name
+
+    SITE_VOLUME="${SITE_NAME}_volume"
+
+    if podman volume exists "$SITE_VOLUME"; then
+        echo "Persistent volume '$SITE_VOLUME' already exists."
+    else
+        echo "Persistent volume for site '$SITE_NAME' does not exist."
+        read -r -p "Do you want to use a diffrent volume? [y/N]: " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+            read -r -p "Enter custom volume name [default: $SITE_VOLUME]: " custom_name
+            SITE_VOLUME="${custom_name:-$SITE_VOLUME}"
+            podman volume create "$SITE_VOLUME"
+            echo "Volume '$SITE_VOLUME' created."
+        else
+            echo "Volume creation skipped."
+        fi
+    fi
+}
+
 createImage() {
     local port repo db_name db_user db_pass confirm
     local lines
@@ -203,7 +229,7 @@ createImage() {
         return 0
     else
         echo "Error: Failed to build Podman image for site '$SITE_NAME'" >&2
-        exit 1
+        return 1
     fi
 }
 
@@ -214,27 +240,75 @@ runContainer() {
         .[] | select(.SITE_NAME == $SITE_NAME) | .PORT
     ' sites.json)
 
-    podman run -dit \
-        --network=slirp4netns:allow_host_loopback=true \
-        --cap-add=NET_RAW \
-        -p "$port":80 \
-        --name="${SITE_NAME}_container" \
-        localhost/"${SITE_NAME}_image":latest
+    mkdir -p ~/.config/containers/systemd
 
-    return 0;
+    cat > ~/.config/containers/systemd/${SITE_NAME}.container <<EOF
+[Unit]
+Description=${SITE_NAME} Persist Container
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=${SITE_NAME}_image:latest
+Pull=never
+AddCapability=NET_RAW
+ContainerName=${SITE_NAME}_persist
+PublishPort=${port}:80
+Volume=${SITE_NAME}_volume:/var/www/html/sites/default/files:Z
+Network=slirp4netns:allow_host_loopback=true
+
+[Service]
+Restart=unless-stopped
+TimeoutStartSec=1000
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    mkdir -p ~/.config/systemd/user
+    cp /run/user/$(id -u)/systemd/generator/${SITE_NAME}.service ~/.config/systemd/user/
+    systemctl --user daemon-reload
+    systemctl --user enable ${SITE_NAME}.service
+    systemctl --user start ${SITE_NAME}.service
+
+    return 0
 }
 
 handleFailure() {
+    local port repo db_name db_user db_pass confirm
+    local lines
+
     echo "Error occurred. Check input and try again."
     read -p "Would you like to undo the changes made by script? (y/N): " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        podman image rm "${SITE_NAME}_image"
         podman container stop "${SITE_NAME}_container"
         podman container rm "${SITE_NAME}_container"
+        podman image rm "${SITE_NAME}_image"
+
+
+        mapfile -t lines < <(
+            jq -r --arg site_name "$SITE_NAME" '
+              .[] | select(.SITE_NAME == $site_name) |
+              "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)"
+            ' sites.json
+        )
+
+        if [ "${#lines[@]}" -ne 5 ]; then
+            echo "Error: Could not extract all 5 fields for $SITE_NAME"
+            return 1
+        fi
+
+        port="${lines[0]}"
+        repo="${lines[1]}"
+        db_name="${lines[2]}"
+        db_user="${lines[3]}"
+        db_pass="${lines[4]}"
+
 
         sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
-DROP DATABASE \`$SITE_DB_NAME\`;
-DROP USER '$SITE_DB_USERNAME'@'localhost';
+DROP DATABASE \`$db_name\`;
+DROP USER '$db_user'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 
@@ -266,6 +340,7 @@ SITE_NAME=""
 SITE_DB_NAME=""
 SITE_DB_USERNAME=""
 SITE_DB_PASSWD=""
+SITE_VOLUME=""
 DB_CONFIG=""
 
 main() {
@@ -282,6 +357,7 @@ main() {
         updateJSON &&
         createUserAndDB &&
         importDump &&
+        createVolume &&
         createImage && 
         runContainer &&
         echo "::: Operation complete :::"

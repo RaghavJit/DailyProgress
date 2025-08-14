@@ -1,0 +1,20 @@
+[Unit]
+Description=OSDAG Persist Container
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=osdag_image:latest
+Pull=never
+AddCapability=NET_RAW
+ContainerName=osdag_persist
+PublishPort=8082:80
+Volume=osdag_volume:/var/www/html/sites/default/files:Z
+Network=slirp4netns:allow_host_loopback=true
+
+[Service]
+Restart=unless-stopped
+TimeoutStartSec=1000
+
+[Install]
+WantedBy=default.target

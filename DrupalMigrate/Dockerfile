@@ -15,7 +15,7 @@ RUN apt update && \
     apt install -y software-properties-common && \
     add-apt-repository ppa:ondrej/php -y && \
     apt update && \
-    apt install -y git apache2 \ 
+    apt install -y unzip git apache2 \ 
     php8.1 php8.1-cli php8.1-common php8.1-imap php8.1-redis php8.1-snmp \
     php8.1-xml php8.1-zip php8.1-mbstring php8.1-curl libapache2-mod-php php8.1-mysql php8.1-gd && \
     echo "ServerName 10.0.2.2" >> /etc/apache2/apache2.conf && \
@@ -40,4 +40,5 @@ RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" &&
 
 EXPOSE 80
 
-CMD ["bash", "-c", "apachectl start && bash"]
+ENTRYPOINT ["apachectl"]
+CMD ["-DFOREGROUND"]
