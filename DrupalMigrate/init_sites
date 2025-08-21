@@ -35,7 +35,7 @@ testInput() {
         read -r -p "Do you wish to use this username? (y/n): " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             echo "Going ahead with $SITE_DB_USERNAME..."
-            read -r -p "Enter the password of the user:" SITE_DB_PASSWD
+            read -s -p "Enter the password of the user: " SITE_DB_PASSWD
             echo
 
             return 0
@@ -51,12 +51,8 @@ getInput() {
         return 0;
     fi
 
-    local tmp_rootpass
-    local tmp_site_db_username
-    local tmp_site_db_name
-    local tmp_site_db_dump
-    local tmp_site_name
-    local confirm
+    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name
+    local tag confirm
 
     while true; do
         read -s -p "Enter MySQL root password: " tmp_rootpass
@@ -64,6 +60,9 @@ getInput() {
         echo "!! Kindly use lowercase for naming and don't include white spaces !!"
         read -r -p "Enter name of the site: " tmp_site_name
         read -r -p "Enter name of site database: " tmp_site_db_name
+        read -r -p "Add date tag to database name? [default: _$(date +%Y_%m_%d)]: " tag
+        tag=${tag:-_$(date +%Y_%m_%d)}
+        tmp_site_db_name="${tmp_site_db_name}${tag}"
         read -r -p "Enter database username you wish to use: " tmp_site_db_username
         read -r -p "Enter path to SQL dumpfile for site: " tmp_site_db_dump
         echo
@@ -73,6 +72,9 @@ getInput() {
         echo "Database Name    : $tmp_site_db_name"
         echo "Database Username: $tmp_site_db_username"
         echo "SQL Dump File    : $tmp_site_db_dump"
+        echo "Image Name       : ${tmp_site_name}_image"
+        echo "Container Name   : ${tmp_site_name}_container"
+        echo "Service Name     : ${tmp_site_name}_persist"
         echo
 
         read -r -p "Is this information correct? (y/n): " confirm
@@ -81,7 +83,10 @@ getInput() {
             SITE_NAME="$tmp_site_name"
             SITE_DB_USERNAME="$tmp_site_db_username"
             SITE_DB_DUMP="$tmp_site_db_dump"
-            SITE_DB_NAME="${tmp_site_db_name}_$(date +%Y_%m_%d)"
+            SITE_SERVICE="${tmp_site_name}_persist"
+            SITE_IMAGE="${tmp_site_name}_image"
+            SITE_CONTAINER="${tmp_site_name}_container"
+            SITE_DB_NAME="${tmp_site_db_name}"
             SITE_DB_PASSWD=$(echo "$(tr -dc 'A-Z' </dev/urandom | head -c 1)$(tr -dc 'a-z' </dev/urandom | head -c 1)$(tr -dc '0-9' </dev/urandom | head -c 1)$(tr -dc '!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 1)$(tr -dc 'A-Za-z0-9!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 31)" | fold -w1 | shuf | tr -d '\n')
 
             echo "Confirmed. Continuing..."
@@ -108,12 +113,18 @@ updateJSON() {
        --arg db "$SITE_DB_NAME" \
        --arg user "$SITE_DB_USERNAME" \
        --arg pass "$SITE_DB_PASSWD" \
+       --arg service "$SITE_SERVICE" \
+       --arg image "$SITE_IMAGE" \
+       --arg container "$SITE_CONTAINER" \
        'map(
          if .SITE_NAME == $site then
            . + {
              "SITE_DB_NAME": $db,
              "SITE_DB_USERNAME": $user,
-             "SITE_DB_PASSWD": $pass
+             "SITE_DB_PASSWD": $pass,
+             "SITE_IMAGE": $image,
+             "SITE_CONTAINER": $container,
+             "SITE_SERVICE": $service
            }
          else .
          end
@@ -157,7 +168,8 @@ importDump() {
 
     echo "Importing ${SITE_DB_DUMP} to ${SITE_DB_NAME}"
 
-    sudo mysql -u root -p"$ROOTPASS" "$SITE_DB_NAME" < "$SITE_DB_DUMP" 2> >(grep -v "Using a password on the command line" >&2)
+     
+    sudo mysql -u root -p"$ROOTPASS" "$SITE_DB_NAME" < <(sed -e '/^CREATE DATABASE/d' -e '/^USE /d' "$SITE_DB_DUMP")  2> >(grep -v "Using a password on the command line" >&2)
     return 0
 }
 
@@ -184,7 +196,7 @@ createVolume() {
 }
 
 createImage() {
-    local port repo db_name db_user db_pass confirm
+    local port repo db_name db_user db_pass site_image confirm
     local lines
 
     echo "SITE_NAME: $SITE_NAME"
@@ -192,12 +204,12 @@ createImage() {
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
-          "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)"
+          "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)\n\(.SITE_IMAGE)"
         ' sites.json
     )
 
-    if [ "${#lines[@]}" -ne 5 ]; then
-        echo "Error: Could not extract all 5 fields for $SITE_NAME"
+    if [ "${#lines[@]}" -ne 6 ]; then
+        echo "Error: Could not extract all 6 fields for $SITE_NAME"
         return 1
     fi
 
@@ -206,9 +218,12 @@ createImage() {
     db_name="${lines[2]}"
     db_user="${lines[3]}"
     db_pass="${lines[4]}"
+    site_image="${lines[5]}"
+
+    SITE_IMAGE=$site_image
 
     echo "Building Podman image with:"
-    echo "Site Name        : $SITE_NAME"
+    echo "Site Image Name  : $SITE_IMAGE"
     echo "Database Name    : $db_name"
     echo "Database Username: $db_user"
     echo "Repository       : $repo"
@@ -220,7 +235,7 @@ createImage() {
         *) echo "Aborted by user."; return 1 ;;
     esac
 
-    if podman build -t "${SITE_NAME}_image" . \
+    if podman build -t "$SITE_IMAGE" . \
         --build-arg REPO="$repo" \
         --build-arg ENV_DB="$db_name" \
         --build-arg ENV_USR="$db_user" \
@@ -228,33 +243,52 @@ createImage() {
         --build-arg ENV_HOST="10.0.2.2"; then
         return 0
     else
-        echo "Error: Failed to build Podman image for site '$SITE_NAME'" >&2
+        echo "Error: Failed to build Podman image $SITE_IMAGE for site '$SITE_NAME'" >&2
         return 1
     fi
 }
 
 runContainer() {
-    local port
+    local port site_service site_image site_container
 
-    port=$(jq -r --arg SITE_NAME "$SITE_NAME" '
-        .[] | select(.SITE_NAME == $SITE_NAME) | .PORT
-    ' sites.json)
+    mapfile -t lines < <(
+        jq -r --arg site_name "$SITE_NAME" '
+          .[] | select(.SITE_NAME == $site_name) |
+          "\(.PORT)\n\(.SITE_IMAGE)\n\(.SITE_CONTAINER)\n\(.SITE_SERVICE)"
+        ' sites.json
+    )
+
+    if [ "${#lines[@]}" -ne 4 ]; then
+        echo "Error: Could not extract all 4 fields for $SITE_NAME to build container."
+        return 1
+    fi
+
+    port="${lines[0]}"
+    site_image="${lines[1]}"
+    site_container="${lines[2]}"
+    site_service="${lines[3]}"
+
+    PORT=$port
+    SITE_IMAGE=$site_image
+    SITE_CONTAINER=$site_container
+    SITE_SERVICE=$site_service
 
     mkdir -p ~/.config/containers/systemd
 
-    cat > ~/.config/containers/systemd/${SITE_NAME}.container <<EOF
+    echo "Writing container file to ~/.config/containers/systemd/${SITE_SERVICE}.container"
+    cat > ~/.config/containers/systemd/${SITE_SERVICE}.container <<EOF
 [Unit]
 Description=${SITE_NAME} Persist Container
 After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=${SITE_NAME}_image:latest
+Image=${SITE_IMAGE}:latest
 Pull=never
 AddCapability=NET_RAW
-ContainerName=${SITE_NAME}_persist
-PublishPort=${port}:80
-Volume=${SITE_NAME}_volume:/var/www/html/sites/default/files:Z
+ContainerName=${SITE_CONTAINER}
+PublishPort=${PORT}:80
+Volume=${SITE_VOLUME}:/var/www/html/sites/default/files:Z
 Network=slirp4netns:allow_host_loopback=true
 
 [Service]
@@ -265,37 +299,36 @@ TimeoutStartSec=1000
 WantedBy=default.target
 EOF
 
+    echo "Building Service to ~/.config/systemd/user/${SITE_SERVICE}.service"
     systemctl --user daemon-reload
     mkdir -p ~/.config/systemd/user
-    cp /run/user/$(id -u)/systemd/generator/${SITE_NAME}.service ~/.config/systemd/user/
+    cp /run/user/$(id -u)/systemd/generator/${site_service}.service ~/.config/systemd/user/
+    echo "Starting service ${SITE_SERVICE}.service"
     systemctl --user daemon-reload
-    systemctl --user enable ${SITE_NAME}.service
-    systemctl --user start ${SITE_NAME}.service
+    systemctl --user enable ${site_service}.service
+    systemctl --user start ${site_service}.service
 
     return 0
 }
 
 handleFailure() {
-    local port repo db_name db_user db_pass confirm
+    local port repo db_name db_user db_pass site_image site_container site_service confirm
     local lines
 
     echo "Error occurred. Check input and try again."
     read -p "Would you like to undo the changes made by script? (y/N): " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        podman container stop "${SITE_NAME}_container"
-        podman container rm "${SITE_NAME}_container"
-        podman image rm "${SITE_NAME}_image"
 
 
         mapfile -t lines < <(
             jq -r --arg site_name "$SITE_NAME" '
               .[] | select(.SITE_NAME == $site_name) |
-              "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)"
+              "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)\n\(.SITE_IMAGE)\n\(.SITE_CONTAINER)\n\(.SITE_SERVICE)"
             ' sites.json
         )
 
-        if [ "${#lines[@]}" -ne 5 ]; then
-            echo "Error: Could not extract all 5 fields for $SITE_NAME"
+        if [ "${#lines[@]}" -ne 8 ]; then
+            echo "Error: Could not extract all 8 fields for $SITE_NAME"
             return 1
         fi
 
@@ -304,7 +337,20 @@ handleFailure() {
         db_name="${lines[2]}"
         db_user="${lines[3]}"
         db_pass="${lines[4]}"
+        site_image="${lines[5]}"
+        site_container="${lines[6]}"
+        site_service="${lines[7]}"
 
+        systemctl --user disable ${site_service}
+        systemctl --user stop ${site_service}
+
+        rm /run/user/$(id -u)/systemd/generator/${site_service}.service
+        rm ${HOME}/.config/containers/systemd/${site_service}.container
+        rm ${HOME}/.config/systemd/user/${site_service}.service
+
+        podman container stop $site_container
+        podman container rm $site_container
+        podman image rm $site_image
 
         sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
 DROP DATABASE \`$db_name\`;
@@ -316,12 +362,18 @@ EOF
            --arg db "" \
            --arg user "" \
            --arg pass "" \
+           --arg service "" \
+           --arg image "" \
+           --arg container "" \
            'map(
              if .SITE_NAME == $site then
                . + {
                  "SITE_DB_NAME": $db,
                  "SITE_DB_USERNAME": $user,
-                 "SITE_DB_PASSWD": $pass
+                 "SITE_DB_PASSWD": $pass,
+                 "SITE_IMAGE": $image,
+                 "SITE_CONTAINER": $container,
+                 "SITE_SERVICE": $service
                }
              else .
              end
@@ -341,11 +393,14 @@ SITE_DB_NAME=""
 SITE_DB_USERNAME=""
 SITE_DB_PASSWD=""
 SITE_VOLUME=""
+SITE_IMAGE=""
+SITE_CONTAINER=""
+SITE_SERVICE=""
 DB_CONFIG=""
 
 main() {
 
-    if [[ $1 == "-d" ]]; then
+    if [[ $1 == "-s" ]]; then
         DB_CONFIG=1
         shift
     fi
@@ -367,5 +422,5 @@ main() {
     }
 }
 
-main "$@"
+time main "$@"
 
