@@ -41,7 +41,7 @@ RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" &&
     phpenmod curl && \ 
     phpenmod gd && \
     /usr/local/bin/composer update && \
-    curl -s https://raw.githubusercontent.com/Metadrop/drupal-fix-permissions-script/refs/heads/main/drupal_fix_permissions.sh | bash -s -- -u=${ENV_USR}
+    curl -s https://raw.githubusercontent.com/Metadrop/drupal-fix-permissions-script/refs/heads/main/drupal_fix_permissions.sh | bash -s -- -u=${ENV_USR} -p=/var/www/html/web
 
 EXPOSE 80
 
