@@ -195,15 +195,15 @@ createVolume() {
         echo "Persistent volume '$SITE_VOLUME' already exists."
     else
         echo "Persistent volume for site '$SITE_NAME' does not exist."
-        read -r -p "Do you want to use a diffrent volume? [y/N]: " confirm
-        if [[ "$confirm" =~ ^[Yy]$ ]]; then
-            read -r -p "Enter custom volume name [default: $SITE_VOLUME]: " custom_name
-            SITE_VOLUME="${custom_name:-$SITE_VOLUME}"
-            podman volume create "$SITE_VOLUME"
-            echo "Volume '$SITE_VOLUME' created."
-        else
-            echo "Volume creation skipped."
-        fi
+    fi
+    read -r -p "Do you want to create and use a new volume? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        read -r -p "Enter custom volume name [default: $SITE_VOLUME]: " custom_name
+        SITE_VOLUME="${custom_name:-$SITE_VOLUME}"
+        podman volume create "$SITE_VOLUME"
+        echo "Volume '$SITE_VOLUME' created."
+    else
+        echo "Using $SITE_VOLUME, new volume creation skipped."
     fi
 }
 
