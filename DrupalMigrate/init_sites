@@ -28,6 +28,15 @@ testInput() {
         exit 1
     fi
 
+    if [[ "$SITE_VERSION" == "10" ]]; then
+        SITE_VERSION="Dockerfile"
+    elif [[ "$SITE_VERSION" == "11" ]]; then
+        SITE_VERSION="Dockerfile.11"
+    else
+        echo "Error: Invalid Drupal Version (Choose 10 or 11)."
+        exit 1
+    fi
+
     user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'" 2> >(grep -v "Using a password on the command line" >&2))
 
     if [[ "$user_exists" -ne 0 ]]; then
@@ -51,7 +60,7 @@ getInput() {
         return 0;
     fi
 
-    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name
+    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version
     local tag confirm
 
     while true; do
@@ -65,6 +74,7 @@ getInput() {
         tmp_site_db_name="${tmp_site_db_name}${tag}"
         read -r -p "Enter database username you wish to use: " tmp_site_db_username
         read -r -p "Enter path to SQL dumpfile for site: " tmp_site_db_dump
+        read -r -p "Choose Drupal version for site (10, 11): " tmp_site_version
         echo
 
         echo "Summary of entered information:"
@@ -75,12 +85,14 @@ getInput() {
         echo "Image Name       : ${tmp_site_name}_image"
         echo "Container Name   : ${tmp_site_name}_container"
         echo "Service Name     : ${tmp_site_name}_persist"
+        echo "Drupal Version   : $tmp_site_version"
         echo
 
         read -r -p "Is this information correct? (y/n): " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             ROOTPASS="$tmp_rootpass"
             SITE_NAME="$tmp_site_name"
+            SITE_NAME="$tmp_site_version"
             SITE_DB_USERNAME="$tmp_site_db_username"
             SITE_DB_DUMP="$tmp_site_db_dump"
             SITE_SERVICE="${tmp_site_name}_persist"
@@ -235,7 +247,7 @@ createImage() {
         *) echo "Aborted by user."; return 1 ;;
     esac
 
-    if podman build -t "$SITE_IMAGE" . \
+    if podman build -t "$SITE_IMAGE" -f "$SITE_VERSION" . \
         --build-arg REPO="$repo" \
         --build-arg ENV_DB="$db_name" \
         --build-arg ENV_USR="$db_user" \
@@ -389,6 +401,7 @@ EOF
 PORT=""
 REPO=""
 SITE_NAME=""
+SITE_VERSION=""
 SITE_DB_NAME=""
 SITE_DB_USERNAME=""
 SITE_DB_PASSWD=""
