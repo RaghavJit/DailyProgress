@@ -92,7 +92,7 @@ getInput() {
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             ROOTPASS="$tmp_rootpass"
             SITE_NAME="$tmp_site_name"
-            SITE_NAME="$tmp_site_version"
+            SITE_VERSION="$tmp_site_version"
             SITE_DB_USERNAME="$tmp_site_db_username"
             SITE_DB_DUMP="$tmp_site_db_dump"
             SITE_SERVICE="${tmp_site_name}_persist"
