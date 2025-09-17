@@ -33,12 +33,9 @@ Helps the container securely access the host's localhost.
 
 ## **Steps for building**
 
-Create database and import dump file (make sure all the sql dumpfiles and sites.csv is present in the same directory.)
-```
-./database.sh
-```
+1. Create database and import dump file.
 
-Build the docker image with Dockerfile, 
+2. Build the docker image with Dockerfile, 
 ```
 podman build -t <name-of-your-image> . \
   --build-arg REPO=<repository-to-be-containerized> \
@@ -49,7 +46,7 @@ podman build -t <name-of-your-image> . \
   --build-arg ENV_HOST=10.0.2.2
 ```
 
-Start a container with newly created image
+3. Start a container with newly created image
 ```
 podman run -dit \
   --network=slirp4netns:allow_host_loopback=true \
@@ -59,7 +56,7 @@ podman run -dit \
   localhost/<name-of-your-image>:latest
 ```
 
-This must start teh site on specified port in most cases
+This must start the site on specified port in most cases
 
 
 ## **Troubleshooting**
@@ -95,17 +92,5 @@ To test mysql connection
 ```
 mysql -h <ip you obtained> -u <username> -p <database name>
 ```
-
-
 ## **Automation**
-To avoid all the labour of performing the above steps for multiple sites [this](./init_sites) bash script can be employed. 
-
-**Usage:**
-1. Make sure jq, Podman and MySQL server are installed on the host machine where this script is run.
-1. This script uses jq for reading sites.json, make sure sites.json exists in the same directory and has 'SITE_NAME', 'PORT', 'REPO' are fields are present in the site object.
-1. [Dockerfile](./Dockerfile) should be present in the same directory.
-```
-./init_sites
-```
-
-The script is failsafe, it deletes/undoes errornous configuration if script fails. It performs input validation, file check and provides verbose output by default.
+To avoid all the labour of performing the above steps for multiple sites refer the [docs](./Automation.md)
