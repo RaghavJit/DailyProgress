@@ -1,6 +1,7 @@
 FROM docker.io/library/ubuntu:latest
 
 ARG REPO \
+    BRANCH \
     ENV_DB \
     ENV_USR \
     ENV_PSWD \
@@ -28,12 +29,12 @@ RUN apt update && \
     echo "root:root@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases && \
     echo "${ENV_USR}:${ENV_USR}@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases && \
     rm -rf /var/www/html/* && \
-    git clone ${REPO} /var/www/html
+    git clone --branch ${BRANCH} ${REPO} /var/www/html
 
 WORKDIR /var/www/html 
 
 RUN php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    php -r 'if (hash_file("sha384", "composer-setup.php") === "dac665fdc30fdd8ec78b38b9800061b4150413ff2e3b6f88543c636f7cd84f6db9189d43a81e5503cda447da73c7e5b6") { echo "Installer verified\n"; } else { echo "Installer corrupt\n"; unlink("composer-setup.php"); exit(1); }' && \
+    php -r 'if (hash_file("sha384", "composer-setup.php") === "ed0feb545ba87161262f2d45a633e34f591ebb3381f2e0063c345ebea4d228dd0043083717770234ec00c5a9f9593792") { echo "Installer verified\n"; } else { echo "Installer corrupt\n"; unlink("composer-setup.php"); exit(1); }' && \
     php composer-setup.php && \
     php -r "unlink('composer-setup.php');" && \
     mv ./composer.phar /usr/local/bin/composer && \
