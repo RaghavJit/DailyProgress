@@ -37,6 +37,9 @@ testInput() {
         exit 1
     fi
 
+    #TODO check for branch validity
+    SITE_BRANCH="$tmp_site_branch"
+
     user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'" 2> >(grep -v "Using a password on the command line" >&2))
 
     if [[ "$user_exists" -ne 0 ]]; then
@@ -60,7 +63,7 @@ getInput() {
         return 0;
     fi
 
-    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version
+    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version tmp_site_branch
     local tag confirm
 
     while true; do
@@ -75,6 +78,7 @@ getInput() {
         read -r -p "Enter database username you wish to use: " tmp_site_db_username
         read -r -p "Enter path to SQL dumpfile for site: " tmp_site_db_dump
         read -r -p "Choose Drupal version for site (10, 11): " tmp_site_version
+        read -r -p "Enter branch name to clone: " tmp_site_branch
         echo
 
         echo "Summary of entered information:"
@@ -249,6 +253,7 @@ createImage() {
 
     if podman build -t "$SITE_IMAGE" -f "$SITE_VERSION" . \
         --build-arg REPO="$repo" \
+        --build-arg BRANCH="$SITE_BRANCH" \
         --build-arg ENV_DB="$db_name" \
         --build-arg ENV_USR="$db_user" \
         --build-arg ENV_PSWD="$db_pass" \
@@ -400,6 +405,7 @@ EOF
 
 PORT=""
 REPO=""
+SITE_BRANCH=""
 SITE_NAME=""
 SITE_VERSION=""
 SITE_DB_NAME=""
