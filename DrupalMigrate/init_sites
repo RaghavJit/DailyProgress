@@ -126,6 +126,7 @@ updateJSON() {
     fi
 
     jq --arg site "$SITE_NAME" \
+       --arg branch "$SITE_BRANCH" \
        --arg db "$SITE_DB_NAME" \
        --arg user "$SITE_DB_USERNAME" \
        --arg pass "$SITE_DB_PASSWD" \
@@ -135,6 +136,7 @@ updateJSON() {
        'map(
          if .SITE_NAME == $site then
            . + {
+             "SITE_BRANCH": $branch,
              "SITE_DB_NAME": $db,
              "SITE_DB_USERNAME": $user,
              "SITE_DB_PASSWD": $pass,
@@ -189,6 +191,27 @@ importDump() {
     return 0
 }
 
+cloneRepo() {
+    
+    mapfile -t lines < <(
+        jq -r --arg site_name "$SITE_NAME" '
+          .[] | select(.SITE_NAME == $site_name) |
+          "\(.REPO)\n\(.SITE_BRANCH)"
+        ' sites.json
+    )
+
+    if [ "${#lines[@]}" -ne 2 ]; then
+        echo "Error: Could not extract all 2 fields for $SITE_NAME"
+        return 1
+    fi
+
+    repo="${lines[0]}"
+    branch="${lines[1]}"
+
+    git clone --branch ${branch} ${repo}
+
+}
+
 createVolume() {
     local confirm
     local custom_name
@@ -236,6 +259,8 @@ createImage() {
     db_pass="${lines[4]}"
     site_image="${lines[5]}"
 
+    repo=$(echo $repo | awk -F'/' '{print $NF}')
+
     SITE_IMAGE=$site_image
 
     echo "Building Podman image with:"
@@ -252,8 +277,7 @@ createImage() {
     esac
 
     if podman build -t "$SITE_IMAGE" -f "$SITE_VERSION" . \
-        --build-arg REPO="$repo" \
-        --build-arg BRANCH="$SITE_BRANCH" \
+        --build-arg REPO_DIR="$repo" \
         --build-arg ENV_DB="$db_name" \
         --build-arg ENV_USR="$db_user" \
         --build-arg ENV_PSWD="$db_pass" \
@@ -358,6 +382,8 @@ handleFailure() {
         site_container="${lines[6]}"
         site_service="${lines[7]}"
 
+        repo=$(echo "${repo}" | awk -F'/' '{print $NF}')
+
         systemctl --user disable ${site_service}
         systemctl --user stop ${site_service}
 
@@ -368,6 +394,8 @@ handleFailure() {
         podman container stop $site_container
         podman container rm $site_container
         podman image rm $site_image
+
+        rm -rf ${repo}
 
         sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
 DROP DATABASE \`$db_name\`;
@@ -431,6 +459,7 @@ main() {
         updateJSON &&
         createUserAndDB &&
         importDump &&
+        cloneRepo &&
         createVolume &&
         createImage && 
         runContainer &&

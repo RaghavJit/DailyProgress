@@ -1,7 +1,6 @@
 FROM docker.io/drupal:10.0-apache
 
-ARG REPO \
-    BRANCH \
+ARG REPO_DIR \
     ENV_DB \
     ENV_USR \
     ENV_PSWD \
@@ -21,8 +20,9 @@ RUN apt update && \
     echo "root:root@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases && \
     echo "${ENV_USR}:${ENV_USR}@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases && \
     unlink /var/www/html && \
-    mkdir -p /var/www/html && \
-    git clone --branch ${BRANCH} ${REPO} /var/www/html
+    mkdir -p /var/www/html 
+
+COPY ${REPO_DIR} /var/www/html
 
 WORKDIR /var/www/html
 
