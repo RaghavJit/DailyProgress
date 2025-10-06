@@ -31,7 +31,7 @@ testInput() {
     if [[ "$SITE_VERSION" == "10" ]]; then
         SITE_VERSION="Dockerfile"
     elif [[ "$SITE_VERSION" == "11" ]]; then
-        SITE_VERSION="Dockerfile.new.11"
+        SITE_VERSION="Dockerfile.11"
     else
         echo "Error: Invalid Drupal Version (Choose 10 or 11)."
         exit 1
