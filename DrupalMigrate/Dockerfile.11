@@ -18,16 +18,16 @@ RUN apt update && \
     echo "Group www-data" >> /etc/apache2/apache2.conf && \
     adduser --disabled-password --gecos "" ${ENV_USR} && \
     echo "root:root@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases && \
-    echo "${ENV_USR}:${ENV_USR}@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases && \
-    unlink /var/www/html && \
-    mkdir -p /var/www/html 
+    echo "${ENV_USR}:${ENV_USR}@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases
 
-COPY ${REPO_DIR} /var/www/html
+WORKDIR /opt/drupal
 
-WORKDIR /var/www/html
+COPY ${REPO_DIR}/web web
+COPY ${REPO_DIR}/composer.lock ${REPO_DIR}/composer.json .
+
 
 RUN composer update && \
-    curl -s https://raw.githubusercontent.com/Metadrop/drupal-fix-permissions-script/refs/heads/main/drupal_fix_permissions.sh | bash -s -- -u=${ENV_USR} -p=/var/www/html/web
+    curl -s https://raw.githubusercontent.com/Metadrop/drupal-fix-permissions-script/refs/heads/main/drupal_fix_permissions.sh | bash -s -- -u=${ENV_USR} -p=/opt/drupal/web
 
 EXPOSE 80
 
