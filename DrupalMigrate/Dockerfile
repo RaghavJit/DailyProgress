@@ -4,6 +4,8 @@ ARG REPO_DIR \
     ENV_DB \
     ENV_USR \
     ENV_PSWD \
+    ENV_SSO_ID \
+    ENV_SSO_SECRET \
     ENV_HOST 
 ENV DEBIAN_FRONTEND=noninteractive \
     ENV_DB=${ENV_DB} \
@@ -27,7 +29,8 @@ COPY ${REPO_DIR} /var/www/html
 WORKDIR /var/www/html
 
 RUN composer update && \
-    curl -s https://raw.githubusercontent.com/Metadrop/drupal-fix-permissions-script/refs/heads/main/drupal_fix_permissions.sh | bash -s -- -u=${ENV_USR}
+    curl -s https://rawcdn.githack.com/Metadrop/drupal-fix-permissions-script/eb12afc0bfe55aa7065f3af6be9713434c60c214/drupal_fix_permissions.sh | bash -s -- -u=${ENV_USR} && \
+    curl -s https://rawcdn.githack.com/kjswaruph/fossee-daily-progress/41f58629de4036573bc50d8c27f91ff530de9346/seperate-vm/drupal | bash -s -- -c=${ENV_SSO_ID} -s=${ENV_SSO_SECRET}
 
 EXPOSE 80
 
