@@ -6,7 +6,6 @@ services:
       dockerfile: <dockerfile name> 
       args:
         REPO_DIR: <github cloned repo>
-        ENV_USR: <database username>
         ENV_HOST: 10.0.2.2
     container_name: <container name> 
     environment:
