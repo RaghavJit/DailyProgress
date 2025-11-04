@@ -40,8 +40,6 @@ testInput() {
     #TODO check for branch validity
     SITE_BRANCH="$tmp_site_branch"
 
-    #TODO validate sso secret
-
     user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'" 2> >(grep -v "Using a password on the command line" >&2))
 
     if [[ "$user_exists" -ne 0 ]]; then
@@ -65,7 +63,7 @@ getInput() {
         return 0;
     fi
 
-    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version tmp_site_branch tmp_site_sso_secret
+    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version tmp_site_branch
     local tag confirm
 
     while true; do
@@ -80,8 +78,6 @@ getInput() {
         read -r -p "Enter database username you wish to use: " tmp_site_db_username
         read -r -p "Enter path to SQL dumpfile for site: " tmp_site_db_dump
         read -r -p "Choose Drupal version for site (10, 11): " tmp_site_version
-        read -s -p "Enter the Keycloak secret: " tmp_site_sso_secret
-        echo
         read -r -p "Enter branch name to clone: " tmp_site_branch
         echo
 
@@ -100,7 +96,6 @@ getInput() {
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             ROOTPASS="$tmp_rootpass"
             SITE_NAME="$tmp_site_name"
-            SITE_SSO_SECRET="$tmp_site_sso_secret"
             SITE_VERSION="$tmp_site_version"
             SITE_DB_USERNAME="$tmp_site_db_username"
             SITE_DB_DUMP="$tmp_site_db_dump"
@@ -135,7 +130,6 @@ updateJSON() {
        --arg db "$SITE_DB_NAME" \
        --arg user "$SITE_DB_USERNAME" \
        --arg pass "$SITE_DB_PASSWD" \
-       --arg secret "$SITE_SSO_SECRET" \
        --arg service "$SITE_SERVICE" \
        --arg image "$SITE_IMAGE" \
        --arg container "$SITE_CONTAINER" \
@@ -146,7 +140,6 @@ updateJSON() {
              "SITE_DB_NAME": $db,
              "SITE_DB_USERNAME": $user,
              "SITE_DB_PASSWD": $pass,
-             "SITE_SSO_SECRET": $secret,
              "SITE_IMAGE": $image,
              "SITE_CONTAINER": $container,
              "SITE_SERVICE": $service
@@ -242,7 +235,7 @@ createVolume() {
 }
 
 createImage() {
-    local port repo db_name db_user db_pass sso_secret site_image confirm
+    local port repo db_name db_user db_pass site_image confirm
     local lines
 
     echo "SITE_NAME: $SITE_NAME"
@@ -250,11 +243,11 @@ createImage() {
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
-              "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)\n\(.SITE_SSO_SECRET)\n\(.SITE_IMAGE)"
+              "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)\n\(.SITE_IMAGE)"
         ' sites.json
     )
 
-    if [ "${#lines[@]}" -ne 7 ]; then
+    if [ "${#lines[@]}" -ne 6 ]; then
         echo "Error: Could not extract all 6 fields for $SITE_NAME"
         return 1
     fi
@@ -264,8 +257,7 @@ createImage() {
     db_name="${lines[2]}"
     db_user="${lines[3]}"
     db_pass="${lines[4]}"
-    sso_secret="${lines[5]}"
-    site_image="${lines[6]}"
+    site_image="${lines[5]}"
 
     repo=$(echo $repo | awk -F'/' '{print $NF}')
 
@@ -289,8 +281,6 @@ createImage() {
         --build-arg ENV_DB="$db_name" \
         --build-arg ENV_USR="$db_user" \
         --build-arg ENV_PSWD="$db_pass" \
-        --build-arg ENV_SSO_ID="$SITE_NAME" \
-        --build-arg ENV_SSO_SECRET="$sso_secret" \
         --build-arg ENV_HOST="10.0.2.2"; then
         return 0
     else
@@ -449,7 +439,6 @@ SITE_VERSION=""
 SITE_DB_NAME=""
 SITE_DB_USERNAME=""
 SITE_DB_PASSWD=""
-SITE_SSO_SECRET=""
 SITE_VOLUME=""
 SITE_IMAGE=""
 SITE_CONTAINER=""
