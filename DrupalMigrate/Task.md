@@ -19,7 +19,7 @@ The task involved migrating Drupal websites from version 7 to 10. The objective 
 ---
 
 ### **Dockerfile Documentation:**
-To understand the functionality of the Dockerfile, please refer to the [**Script Documentation**](./Script.md).
+To understand the functionality of the Dockerfile, please refer to the [**Script Documentation**](./DockerfileDoc.md).
 
 ---
 
@@ -33,33 +33,48 @@ Helps the container securely access the host's localhost.
 
 ## **Steps for building**
 
-1. Create database and import dump file.
-
-2. Build the docker image with Dockerfile, 
+1. Create database and import dump file. Run the following commands in sql terminal.
 ```
-podman build -t <name-of-your-image> . \
-  --build-arg REPO=<repository-to-be-containerized> \
-  --build-arg PORT=<port-to-host-the-site> \
-  --build-arg ENV_DB=<database-for-site> \
-  --build-arg ENV_USR=<username-for-database> \
-  --build-arg ENV_PSWD=<password-for-database-for-the-username> \
-  --build-arg ENV_HOST=10.0.2.2
+CREATE DATABASE <database name>;
+CREATE USER '<database username>'@'localhost' IDENTIFIED BY '<database user password>';
+GRANT ALL PRIVILEGES ON '<database name>'.* TO '<database username>'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+2. Import .sql dump to the database;
+```
+sudo mysql -u root -p "<database name>" < <dumpfile path>
+```
+
+**The place holders are described [here](./deployDoc.md) make sure the same values are used in [deploy.yml](./deploy.yml) file**
+
+3. Clone the repo to be hosted, and place in the same directory as deploy.yml and Dockerfile
+```
+.
+|
+--deploy.yml
+|
+--Dockerfile
+|
+--<github cloned repo>
+```
+
+3. Build image with podman compose, since this image does not contain any sensitive secrets it can be shared freely and pushed to cloud platforms like DockerHub.
+```
+podman-compose -f deploy.yml build
 ```
 
 3. Start a container with newly created image
 ```
-podman run -dit \
-  --network=slirp4netns:allow_host_loopback=true \
-  --cap-add=NET_RAW \
-  -p <port-number-to-run-the-site>:80 \
-  --name=<name-of-your-container> \
-  localhost/<name-of-your-image>:latest
+podman-compose -f deploy.yml up -d
 ```
 
 This must start the site on specified port in most cases
 
 
 ## **Troubleshooting**
+
+### Database not connecting
 In some rare case, the host specified in the build command **10.0.0.2** might change, this will prevent the database from connecting and site will give out a message like
 ```
 The website encountered an unexpected error. Try again later.
@@ -92,5 +107,16 @@ To test mysql connection
 ```
 mysql -h <ip you obtained> -u <username> -p <database name>
 ```
+
+### Podman compose issue
+Podman compose is a thin wrapper around a compose provider kindly make sure you have the right compose provider installed, it is recommended to use podman compose as some options in [deploy.yml](./deploy.yml) are podman specific. After removing those options the same file might be used with docker-compose, the reliability of the same is not guaranteed.
+```
+sudo apt install podman-compose   # Debian/Ubuntu
+# or
+sudo dnf install podman-compose   # Fedora/RHEL
+# and check 
+podman-compose --version
+```
+
 ## **Automation**
-To avoid all the labour of performing the above steps for multiple sites refer the [docs](./Automation.md)
+To avoid all the labour of performing the above steps for multiple sites you can use the automation scripts available on automation branch. 

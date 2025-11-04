@@ -1,0 +1,23 @@
+services:
+  drupal:
+    image: <image name> 
+    build:
+      context: .
+      dockerfile: <dockerfile name> 
+      args:
+        REPO_DIR: <github cloned repo>
+        ENV_USR: <database username>
+        ENV_HOST: 10.0.2.2
+    container_name: <container name> 
+    environment:
+      ENV_USR: <database username> 
+      ENV_HOST: 10.0.2.2
+      ENV_DB: <dumpfile path>
+      ENV_PSWD: <database user password>
+    ports:
+      - "<port on host>:80"
+    restart: unless-stopped
+    network_mode: "slirp4netns:allow_host_loopback=true"
+    cap_add:
+      - NET_RAW
+

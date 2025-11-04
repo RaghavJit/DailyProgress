@@ -1,14 +1,10 @@
 FROM docker.io/drupal:11.0-apache
 
 ARG REPO_DIR \
-    ENV_DB \
     ENV_USR \
-    ENV_PSWD \
     ENV_HOST 
 ENV DEBIAN_FRONTEND=noninteractive \
-    ENV_DB=${ENV_DB} \
     ENV_USR=${ENV_USR} \
-    ENV_PSWD=${ENV_PSWD} \
     ENV_HOST=${ENV_HOST}
 
 RUN apt update && \
@@ -24,7 +20,6 @@ WORKDIR /opt/drupal
 
 COPY ${REPO_DIR}/web web
 COPY ${REPO_DIR}/composer.lock ${REPO_DIR}/composer.json .
-
 
 RUN composer update && \
     curl -s https://raw.githubusercontent.com/Metadrop/drupal-fix-permissions-script/refs/heads/main/drupal_fix_permissions.sh | bash -s -- -u=${ENV_USR} -p=/opt/drupal/web
