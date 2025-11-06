@@ -235,7 +235,7 @@ createVolume() {
 }
 
 createImage() {
-    local port repo db_name db_user db_pass site_image confirm
+    local port repo db_user site_image confirm
     local lines
 
     echo "SITE_NAME: $SITE_NAME"
@@ -243,21 +243,19 @@ createImage() {
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
-              "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)\n\(.SITE_IMAGE)"
+              "\(.PORT)\n\(.REPO)\n\(.SITE_DB_USERNAME)\n\(.SITE_IMAGE)"
         ' sites.json
     )
 
-    if [ "${#lines[@]}" -ne 6 ]; then
-        echo "Error: Could not extract all 6 fields for $SITE_NAME"
+    if [ "${#lines[@]}" -ne 4 ]; then
+        echo "Error: Could not extract all 4 fields for $SITE_NAME"
         return 1
     fi
 
     port="${lines[0]}"
     repo="${lines[1]}"
-    db_name="${lines[2]}"
-    db_user="${lines[3]}"
-    db_pass="${lines[4]}"
-    site_image="${lines[5]}"
+    db_user="${lines[2]}"
+    site_image="${lines[3]}"
 
     repo=$(echo $repo | awk -F'/' '{print $NF}')
 
@@ -278,15 +276,35 @@ createImage() {
 
     if podman build -t "$SITE_IMAGE" -f "$SITE_VERSION" . \
         --build-arg REPO_DIR="$repo" \
-        --build-arg ENV_DB="$db_name" \
         --build-arg ENV_USR="$db_user" \
-        --build-arg ENV_PSWD="$db_pass" \
         --build-arg ENV_HOST="10.0.2.2"; then
         return 0
     else
         echo "Error: Failed to build Podman image $SITE_IMAGE for site '$SITE_NAME'" >&2
         return 1
     fi
+}
+
+makePodmanSecrets() {
+    local db_name db_pass
+     
+    mapfile -t lines < <(
+        jq -r --arg site_name "$SITE_NAME" '
+          .[] | select(.SITE_NAME == $site_name) |
+              "\(.SITE_DB_NAME)\n\(.SITE_DB_PASSWD)"
+        ' sites.json
+    )
+
+    if [ "${#lines[@]}" -ne 2 ]; then
+        echo "Error: Could not extract all 2 fields for $SITE_NAME"
+        return 1
+    fi
+
+    db_name="${lines[0]}"
+    db_pass="${lines[1]}"
+
+    echo "${db_name}" | podman secret create "${SITE_NAME}_mysql_db" -
+    echo "${db_pass}" | podman secret create "${SITE_NAME}_mysql_password" -
 }
 
 runContainer() {
@@ -344,6 +362,10 @@ EOF
     systemctl --user daemon-reload
     mkdir -p ~/.config/systemd/user
     cp /run/user/$(id -u)/systemd/generator/${site_service}.service ~/.config/systemd/user/
+
+    echo "Adding Podman Secrets to service file"
+    sed -i "/^ExecStart=/ s|\(openplc_image:latest\)|--secret ${SITE_NAME}_mysql_db,type=env,target=ENV_DB --secret ${SITE_NAME}_mysql_password,type=env,target=ENV_PSWD \1|" ~/.config/systemd/user/${SITE_SERVICE}.service 
+
     echo "Starting service ${SITE_SERVICE}.service"
     systemctl --user daemon-reload
     systemctl --user enable ${site_service}.service
@@ -396,6 +418,9 @@ handleFailure() {
         podman image rm $site_image
 
         rm -rf ${repo}
+
+        printf "%s" "${db_name}" | podman secret create "${SITE_NAME}_mysql_db" -
+        printf "%s" "${db_pass}" | podman secret create "${SITE_NAME}_mysql_password" -
 
         sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
 DROP DATABASE \`$db_name\`;
@@ -462,6 +487,7 @@ main() {
         cloneRepo &&
         createVolume &&
         createImage && 
+        makePodmanSecrets &&
         runContainer &&
         echo "::: Operation complete :::"
     } || {
