@@ -303,8 +303,9 @@ makePodmanSecrets() {
     db_name="${lines[0]}"
     db_pass="${lines[1]}"
 
-    echo "${db_name}" | podman secret create "${SITE_NAME}_mysql_db" -
-    echo "${db_pass}" | podman secret create "${SITE_NAME}_mysql_password" -
+    echo "Making Podman secrets..."
+    printf "%s" "${db_name}" | podman secret create "${SITE_NAME}_mysql_db" -
+    printf "%s" "${db_pass}" | podman secret create "${SITE_NAME}_mysql_password" -
 }
 
 runContainer() {
@@ -364,10 +365,12 @@ EOF
     cp /run/user/$(id -u)/systemd/generator/${site_service}.service ~/.config/systemd/user/
 
     echo "Adding Podman Secrets to service file"
-    sed -i "/^ExecStart=/ s|\(openplc_image:latest\)|--secret ${SITE_NAME}_mysql_db,type=env,target=ENV_DB --secret ${SITE_NAME}_mysql_password,type=env,target=ENV_PSWD \1|" ~/.config/systemd/user/${SITE_SERVICE}.service 
+    systemctl --user daemon-reload
+    sed -i "/^ExecStart=/ s|\(${SITE_IMAGE}:latest\)| --secret ${SITE_NAME}_mysql_db,type=env,target=ENV_DB --secret ${SITE_NAME}_mysql_password,type=env,target=ENV_PSWD \1|" ~/.config/systemd/user/${SITE_SERVICE}.service
+
 
     echo "Starting service ${SITE_SERVICE}.service"
-    systemctl --user daemon-reload
+
     systemctl --user enable ${site_service}.service
     systemctl --user start ${site_service}.service
 
@@ -419,8 +422,8 @@ handleFailure() {
 
         rm -rf ${repo}
 
-        printf "%s" "${db_name}" | podman secret create "${SITE_NAME}_mysql_db" -
-        printf "%s" "${db_pass}" | podman secret create "${SITE_NAME}_mysql_password" -
+        podman secret rm "${SITE_NAME}_mysql_db"
+        podman secret rm "${SITE_NAME}_mysql_password"
 
         sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
 DROP DATABASE \`$db_name\`;
