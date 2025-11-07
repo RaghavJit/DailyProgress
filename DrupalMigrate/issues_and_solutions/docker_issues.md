@@ -134,9 +134,48 @@ The below mentioned issues are not caused due to misconfiguration or bugs, these
 
 ## Containers don't auto restart on server reboot  
 ## **Problem:**
+We wish the continers to restart in case they crash or server restarts.
+
 ### **Demonstration:**
+Nothing to Demonstrate.
+
 ### **Solution:**
+Using Podman-Systemd-Generate a systemd file can be generated that will automatically restart servers as we want.
+After building the image instead of directly running the container we write a .continer file on path ~/.config/continer/systemd. The continer run options can be written to the file like this:
+```
+[Unit]
+Description=${SITE_NAME} Persist Container
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=${SITE_IMAGE}:latest
+Pull=never
+AddCapability=NET_RAW
+ContainerName=${SITE_CONTAINER}
+PublishPort=${PORT}:80
+Volume=${SITE_VOLUME}:/var/www/html/sites/default/files:Z
+Network=slirp4netns:allow_host_loopback=true
+
+[Service]
+Restart=unless-stopped
+TimeoutStartSec=1000
+
+[Install]
+WantedBy=default.target
+```
+
+running the following command automatcially creates a systemd unit file on path `/run/user/$(id -u)/systemd/generator/`
+```
+systemd --user daemon-reload 
+```
+This can be copied to user's systemd unit files location `~/.config/systemd/user/.`
+
+Since there is not option to add --secret to .container file secret flags had to be manually added to the final systemd unit file.
+
 ### **Resources:**
+1. [Podman Systemd](https://docs.podman.io/en/latest/markdown/podman-generate-systemd.1.html)
+1. [Podman Secrets](https://docs.podman.io/en/latest/markdown/podman-secret-create.1.html)
 
 ## SSMTP configuration not properly causing the email feature to not work properly 
 ## **Problem:**
