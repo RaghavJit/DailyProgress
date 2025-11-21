@@ -37,14 +37,11 @@ testInput() {
         exit 1
     fi
 
-    #TODO check for branch validity
-    SITE_BRANCH="$tmp_site_branch"
-
     user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'" 2> >(grep -v "Using a password on the command line" >&2))
 
     if [[ "$user_exists" -ne 0 ]]; then
         echo "Alert: MySQL user '$SITE_DB_USERNAME' already exists."
-        read -r -p "Do you wish to use this username? (y/n): " confirm
+        read -r -p "Do you wish to use this username? (y/N): " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
             echo "Going ahead with $SITE_DB_USERNAME..."
             read -s -p "Enter the password of the user: " SITE_DB_PASSWD
@@ -60,11 +57,12 @@ testInput() {
 getInput() {
 
     if [[ DB_CONFIG -eq 1 ]]; then
+        echo "Reading Configuration from sites.json file."
         return 0;
     fi
 
     local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version tmp_site_branch
-    local tag confirm
+    local tag confirm tmp_repo branches
 
     while true; do
         read -s -p "Enter MySQL root password: " tmp_rootpass
@@ -78,11 +76,37 @@ getInput() {
         read -r -p "Enter database username you wish to use: " tmp_site_db_username
         read -r -p "Enter path to SQL dumpfile for site: " tmp_site_db_dump
         read -r -p "Choose Drupal version for site (10, 11): " tmp_site_version
-        read -r -p "Enter branch name to clone: " tmp_site_branch
+        echo "Select a branch to clone from the below options:"
         echo
+
+        mapfile -t lines < <(
+            jq -r --arg site_name "$tmp_site_name" '
+              .[] | select(.SITE_NAME == $site_name) |
+              "\(.REPO)"
+            ' sites.json
+        )
+
+        if [ "${#lines[@]}" -ne 1 ]; then
+            echo "Error: Could not extract REPO for $tmp_site_name"
+            return 1
+        fi
+        tmp_repo="${lines[0]}"
+        
+        branches=($(git ls-remote --heads "$tmp_repo" | awk '{print $2}' | sed 's#refs/heads/##'))
+
+        echo "Available branches:"
+        select b in "${branches[@]}"; do
+            if [[ -n "$b" ]]; then
+                tmp_site_branch="$b"
+                break
+            else
+                echo "Invalid choice."
+            fi
+        done
 
         echo "Summary of entered information:"
         echo "Site Name        : $tmp_site_name"
+        echo "Site Branch      : $tmp_site_branch"
         echo "Database Name    : $tmp_site_db_name"
         echo "Database Username: $tmp_site_db_username"
         echo "SQL Dump File    : $tmp_site_db_dump"
@@ -92,10 +116,11 @@ getInput() {
         echo "Drupal Version   : $tmp_site_version"
         echo
 
-        read -r -p "Is this information correct? (y/n): " confirm
-        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        read -r -p "Is this information correct? (Y/n): " confirm
+        if [[ -z "$confirm" || "$confirm" =~ ^[Yy]$ ]]; then
             ROOTPASS="$tmp_rootpass"
             SITE_NAME="$tmp_site_name"
+            SITE_BRANCH="$tmp_site_branch"
             SITE_VERSION="$tmp_site_version"
             SITE_DB_USERNAME="$tmp_site_db_username"
             SITE_DB_DUMP="$tmp_site_db_dump"
@@ -105,7 +130,7 @@ getInput() {
             SITE_DB_NAME="${tmp_site_db_name}"
             SITE_DB_PASSWD=$(echo "$(tr -dc 'A-Z' </dev/urandom | head -c 1)$(tr -dc 'a-z' </dev/urandom | head -c 1)$(tr -dc '0-9' </dev/urandom | head -c 1)$(tr -dc '!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 1)$(tr -dc 'A-Za-z0-9!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 31)" | fold -w1 | shuf | tr -d '\n')
 
-            echo "Confirmed. Continuing..."
+            echo "Confirmed! Continuing..."
             break
         else
             echo "Trying again..."
@@ -114,18 +139,25 @@ getInput() {
     done
 
     testInput &&
-    echo "Config passed input validation"
+    echo "Config passed input validation."
 
     return 0
 }
 
 updateJSON() {
 
-    if [[ DB_CONFIG -eq 1 ]]; then
-        return 0;
+    local tmp_file
+
+    if [[ "$DB_CONFIG" -eq 1 ]]; then
+        echo "::: Skipping PHASE I :::"
+        return 0
     fi
 
-    jq --arg site "$SITE_NAME" \
+    echo "::: PHASE I - SITE CONFIGURATION AND SQL DUMP IMPORT :::"
+
+    tmp_file=$(mktemp)
+
+    if ! jq --arg site "$SITE_NAME" \
        --arg branch "$SITE_BRANCH" \
        --arg db "$SITE_DB_NAME" \
        --arg user "$SITE_DB_USERNAME" \
@@ -146,39 +178,60 @@ updateJSON() {
            }
          else .
          end
-       )' sites.json > tmp && mv tmp sites.json
+       )' sites.json > "$tmp_file"; then
 
+        echo "ERROR: jq failed"
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    if cmp -s sites.json "$tmp_file"; then
+        echo "No changes in sites.json"
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    mv "$tmp_file" sites.json
     echo "Config saved to sites.json"
-    
-    return 0;
+    return 0
 }
 
 createUserAndDB() {
 
     if [[ DB_CONFIG -eq 1 ]]; then
+        echo "User and Database already created in previous run."
         return 0;
     fi
 
     local db_exists
     db_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SHOW DATABASES LIKE '$SITE_DB_NAME'" 2> >(grep -v "Using a password on the command line" >&2))
+    if [[ $? -ne 0 ]]; then
+        echo "ERROR: Failed to check existing databases."
+        return 1
+    fi
 
     if [[ "$db_exists" == "$SITE_DB_NAME" ]]; then
         echo "Database '$SITE_DB_NAME' already exists. Skipping creation."
-    else
-        echo "Creating database '$SITE_DB_NAME' and user '$SITE_DB_USERNAME'..."
+        return 0;
+    fi
 
-        sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
+    echo "Creating database '$SITE_DB_NAME' and user '$SITE_DB_USERNAME'..."
+    if ! sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
 CREATE DATABASE \`$SITE_DB_NAME\`;
 CREATE USER '$SITE_DB_USERNAME'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
 GRANT ALL PRIVILEGES ON \`$SITE_DB_NAME\`.* TO '$SITE_DB_USERNAME'@'localhost';
 FLUSH PRIVILEGES;
 EOF
+    then
+        echo "ERROR: Failed to create database or user."
+        return 1
     fi
 
     return 0
 }
 
 importDump() {
+    local confirm
 
     if [[ DB_CONFIG -eq 1 ]]; then
         return 0;
@@ -187,12 +240,26 @@ importDump() {
     echo "Importing ${SITE_DB_DUMP} to ${SITE_DB_NAME}"
 
      
-    sudo mysql -u root -p"$ROOTPASS" "$SITE_DB_NAME" < <(sed -e '/^CREATE DATABASE/d' -e '/^USE /d' "$SITE_DB_DUMP")  2> >(grep -v "Using a password on the command line" >&2)
-    return 0
+    if ! sudo mysql -u root -p"$ROOTPASS" "$SITE_DB_NAME" < <(sed -e '/^CREATE DATABASE/d' -e '/^USE /d' "$SITE_DB_DUMP") 2> >(grep -v "Using a password on the command line" >&2); then
+
+        echo "ERROR: SQL Dump import failed."
+        return 1
+    fi    
+
+    echo "::: PHASE I - Completed successfully :::"
+    read -r -p "Continue to PHASE II? (Y/n):" confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        exit;
+    fi
+
+    return 0;
 }
 
 cloneRepo() {
-    
+    local repo branch
+
+    echo "::: PHASE II - BUILDING IMAGE AND CONTAINER :::"
+
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
@@ -208,13 +275,20 @@ cloneRepo() {
     repo="${lines[0]}"
     branch="${lines[1]}"
 
-    git clone --branch ${branch} ${repo}
+    rm -rf $(echo "$repo" | awk -F'/' '{gsub(/\.git$/, "", $NF); print $NF}')
+    if ! git clone --branch ${branch} ${repo}; then
+        echo "Error: Git clone failed"
+        return 1;
+    fi
+
+    return 0;
 
 }
 
 createVolume() {
     local confirm
     local custom_name
+
 
     SITE_VOLUME="${SITE_NAME}_volume"
 
@@ -223,6 +297,7 @@ createVolume() {
     else
         echo "Persistent volume for site '$SITE_NAME' does not exist."
     fi
+
     read -r -p "Do you want to create and use a new volume? [y/N]: " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
         read -r -p "Enter custom volume name [default: $SITE_VOLUME]: " custom_name
@@ -257,7 +332,7 @@ createImage() {
     db_user="${lines[2]}"
     site_image="${lines[3]}"
 
-    repo=$(echo $repo | awk -F'/' '{print $NF}')
+    repo=$(echo "$repo" | awk -F'/' '{gsub(/\.git$/, "", $NF); print $NF}')
 
     SITE_IMAGE=$site_image
 
@@ -267,12 +342,6 @@ createImage() {
     echo "Database Username: $db_user"
     echo "Repository       : $repo"
     echo
-
-    read -p "Proceed with image build? (y/N): " confirm
-    case "$confirm" in
-        [yY][eE][sS]|[yY]) ;;
-        *) echo "Aborted by user."; return 1 ;;
-    esac
 
     if podman build -t "$SITE_IMAGE" -f "$SITE_VERSION" . \
         --build-arg REPO_DIR="$repo" \
@@ -304,8 +373,16 @@ makePodmanSecrets() {
     db_pass="${lines[1]}"
 
     echo "Making Podman secrets..."
-    printf "%s" "${db_name}" | podman secret create "${SITE_NAME}_mysql_db" -
-    printf "%s" "${db_pass}" | podman secret create "${SITE_NAME}_mysql_password" -
+    if ! printf "%s" "$db_name" | podman secret create "${SITE_NAME}_mysql_db" -; then
+        echo "ERROR: Failed to create secret ${SITE_NAME}_mysql_db"
+        return 1
+    fi
+    if ! printf "%s" "$db_pass" | podman secret create "${SITE_NAME}_mysql_password" -; then
+        echo "ERROR: Failed to create secret ${SITE_NAME}_mysql_password"
+        return 1
+    fi
+    
+    return 0;
 }
 
 runContainer() {
@@ -381,34 +458,80 @@ handleFailure() {
     local port repo db_name db_user db_pass site_image site_container site_service confirm
     local lines
 
-    echo "Error occurred. Check input and try again."
-    read -p "Would you like to undo the changes made by script? (y/N): " confirm
-    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    mapfile -t lines < <(
+        jq -r --arg site_name "$SITE_NAME" '
+          .[] | select(.SITE_NAME == $site_name) |
+          "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)\n\(.SITE_IMAGE)\n\(.SITE_CONTAINER)\n\(.SITE_SERVICE)"
+        ' sites.json
+    )
 
+    if [ "${#lines[@]}" -ne 8 ]; then
+        echo "Error: Could not extract all 8 fields for $SITE_NAME"
+        return 1
+    fi
 
-        mapfile -t lines < <(
-            jq -r --arg site_name "$SITE_NAME" '
-              .[] | select(.SITE_NAME == $site_name) |
-              "\(.PORT)\n\(.REPO)\n\(.SITE_DB_NAME)\n\(.SITE_DB_USERNAME)\n\(.SITE_DB_PASSWD)\n\(.SITE_IMAGE)\n\(.SITE_CONTAINER)\n\(.SITE_SERVICE)"
-            ' sites.json
-        )
+    port="${lines[0]}"
+    repo="${lines[1]}"
+    db_name="${lines[2]}"
+    db_user="${lines[3]}"
+    db_pass="${lines[4]}"
+    site_image="${lines[5]}"
+    site_container="${lines[6]}"
+    site_service="${lines[7]}"
 
-        if [ "${#lines[@]}" -ne 8 ]; then
-            echo "Error: Could not extract all 8 fields for $SITE_NAME"
-            return 1
+    repo=$(echo "$repo" | awk -F'/' '{gsub(/\.git$/, "", $NF); print $NF}')
+
+    if [[ $DB_CONFIG -eq 2 ]]; then
+        echo "This will delete the following:"
+        echo "1. Configuration in sites.json"
+        echo "2. Imported MySQL Database"
+        echo "3. Image created"
+        echo "4. Container"
+        echo "5. Systemd service to auto restart container"
+        read -p "Would you like to undo ALL the changes made by script for site "$SITE_NAME"? (y/N): " confirm
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            echo "No action taken"
+            return 0;
         fi
+    elif [[ $DB_CONFIG -eq 1 ]]; then
+        echo "Some error occurred during PHASE II choose what to delete"
+        echo "OPTION: Y will delete"
+        echo "1. Image created"
+        echo "2. Container"
+        echo "3. Systemd service to auto restart container"
+        echo "OPTION: N will delete"
+        echo "1. Configuration in sites.json"
+        echo "2. Imported MySQL Database"
+        echo "3. Image created"
+        echo "4. Container"
+        echo "5. Systemd service to auto restart container"
+        read -p "Choose action: " confirm
+    elif [[ $DB_CONFIG -eq 0 ]]; then 
+        echo "Error occurred, check input and try again. Would you like to deleting all changes (Y/n): " confirm
+        if [[ "$confirm" =~ ^[Nn]$ ]]; then
+            echo "Faulty site not deleted"
+            return 0;
+        fi
+    fi
 
-        port="${lines[0]}"
-        repo="${lines[1]}"
-        db_name="${lines[2]}"
-        db_user="${lines[3]}"
-        db_pass="${lines[4]}"
-        site_image="${lines[5]}"
-        site_container="${lines[6]}"
-        site_service="${lines[7]}"
 
-        repo=$(echo "${repo}" | awk -F'/' '{print $NF}')
+    if [[ $DB_CONFIG -eq 1 && "$confirm" =~ ^[Yy]$ ]]; then
+        systemctl --user disable ${site_service}
+        systemctl --user stop ${site_service}
 
+        rm /run/user/$(id -u)/systemd/generator/${site_service}.service
+        rm ${HOME}/.config/containers/systemd/${site_service}.container
+        rm ${HOME}/.config/systemd/user/${site_service}.service
+
+        podman container stop $site_container
+        podman container rm $site_container
+        podman image rm $site_image
+
+        rm -rf ${repo}
+
+        podman secret rm "${SITE_NAME}_mysql_db"
+        podman secret rm "${SITE_NAME}_mysql_password"
+    else
         systemctl --user disable ${site_service}
         systemctl --user stop ${site_service}
 
@@ -451,11 +574,6 @@ EOF
              else .
              end
            )' sites.json > tmp && mv tmp sites.json
-
-        echo "Undo complete. Exiting."
-        exit 1
-    else
-        echo "Continuing without undo."
     fi
 }
 
@@ -471,16 +589,21 @@ SITE_VOLUME=""
 SITE_IMAGE=""
 SITE_CONTAINER=""
 SITE_SERVICE=""
-DB_CONFIG=""
+DB_CONFIG="0"
 
 main() {
 
-    if [[ $1 == "-s" ]]; then
-        DB_CONFIG=1
+    if [[ $1 == "--resume" || $1 == "-r" ]]; then
         shift
+        DB_CONFIG=1
+        SITE_NAME=$1
+    elif [[ $1 == "--delete" || $1 == "-d" ]]; then
+        shift
+        DB_CONFIG=2
+        SITE_NAME=$1
+        handleFailure
+        return 0;
     fi
-
-    SITE_NAME=$1
 
     {
         getInput &&
