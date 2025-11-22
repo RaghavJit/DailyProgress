@@ -247,7 +247,7 @@ importDump() {
     fi    
 
     echo "::: PHASE I - Completed successfully :::"
-    read -r -p "Continue to PHASE II? (Y/n):" confirm
+    read -r -p "Continue to PHASE II? (Y/n): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         exit;
     fi
@@ -456,7 +456,7 @@ EOF
 
 handleFailure() {
     local port repo db_name db_user db_pass site_image site_container site_service confirm
-    local lines
+    local lines status
 
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
@@ -548,11 +548,20 @@ handleFailure() {
         podman secret rm "${SITE_NAME}_mysql_db"
         podman secret rm "${SITE_NAME}_mysql_password"
 
-        sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
+        while true; do
+            sudo mysql -u root -p"$ROOTPASS" \
+                2> >(grep -v "Using a password on the command line" >&2) <<EOF
 DROP DATABASE \`$db_name\`;
 DROP USER '$db_user'@'localhost';
 FLUSH PRIVILEGES;
 EOF
+            status=$?
+            if [[ $status -ne 0 ]]; then
+                echo "MySQL password incorrect... Try again"
+                continue
+            fi
+            break
+        done
 
         jq --arg site "$SITE_NAME" \
            --arg db "" \
