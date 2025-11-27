@@ -37,6 +37,10 @@ testInput() {
         exit 1
     fi
 
+    if [[ "$DEPLOY" =~ ^[yY]$ ]]; then
+        SITE_VERSION="${SITE_VERSION}.dev"
+    fi
+
     user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'" 2> >(grep -v "Using a password on the command line" >&2))
 
     if [[ "$user_exists" -ne 0 ]]; then
@@ -60,8 +64,8 @@ getInput() {
         echo "Reading Configuration from sites.json file."
         return 0;
     fi
-
-    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version tmp_site_branch
+ 
+    local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version tmp_site_branch tmp_deploy
     local tag confirm tmp_repo branches
 
     while true; do
@@ -76,8 +80,8 @@ getInput() {
         read -r -p "Enter database username you wish to use: " tmp_site_db_username
         read -r -p "Enter path to SQL dumpfile for site: " tmp_site_db_dump
         read -r -p "Choose Drupal version for site (10, 11): " tmp_site_version
+        read -r -p "Do you want to deploy in development mode? (Y/n): " tmp_deploy
         echo "Select a branch to clone from the below options:"
-        echo
 
         mapfile -t lines < <(
             jq -r --arg site_name "$tmp_site_name" '
@@ -114,6 +118,7 @@ getInput() {
         echo "Container Name   : ${tmp_site_name}_container"
         echo "Service Name     : ${tmp_site_name}_persist"
         echo "Drupal Version   : $tmp_site_version"
+        echo "Deployment mode  : ${tmp_deploy}"
         echo
 
         read -r -p "Is this information correct? (Y/n): " confirm
@@ -128,6 +133,7 @@ getInput() {
             SITE_IMAGE="${tmp_site_name}_image"
             SITE_CONTAINER="${tmp_site_name}_container"
             SITE_DB_NAME="${tmp_site_db_name}"
+            DEPLOY="${tmp_deploy}"
             SITE_DB_PASSWD=$(echo "$(tr -dc 'A-Z' </dev/urandom | head -c 1)$(tr -dc 'a-z' </dev/urandom | head -c 1)$(tr -dc '0-9' </dev/urandom | head -c 1)$(tr -dc '!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 1)$(tr -dc 'A-Za-z0-9!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 31)" | fold -w1 | shuf | tr -d '\n')
 
             echo "Confirmed! Continuing..."
@@ -338,7 +344,6 @@ createImage() {
 
     echo "Building Podman image with:"
     echo "Site Image Name  : $SITE_IMAGE"
-    echo "Database Name    : $db_name"
     echo "Database Username: $db_user"
     echo "Repository       : $repo"
     echo
@@ -386,16 +391,16 @@ makePodmanSecrets() {
 }
 
 runContainer() {
-    local port site_service site_image site_container
+    local port site_service site_image site_container repo
 
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
-          "\(.PORT)\n\(.SITE_IMAGE)\n\(.SITE_CONTAINER)\n\(.SITE_SERVICE)"
+              "\(.PORT)\n\(.SITE_IMAGE)\n\(.SITE_CONTAINER)\n\(.REPO)\n\(.SITE_SERVICE)"
         ' sites.json
     )
 
-    if [ "${#lines[@]}" -ne 4 ]; then
+    if [ "${#lines[@]}" -ne 5 ]; then
         echo "Error: Could not extract all 4 fields for $SITE_NAME to build container."
         return 1
     fi
@@ -403,7 +408,10 @@ runContainer() {
     port="${lines[0]}"
     site_image="${lines[1]}"
     site_container="${lines[2]}"
-    site_service="${lines[3]}"
+    repo="${lines[3]}"
+    site_service="${lines[4]}"
+
+    repo=$(echo "$repo" | awk -F'/' '{gsub(/\.git$/, "", $NF); print $NF}')
 
     PORT=$port
     SITE_IMAGE=$site_image
@@ -435,6 +443,10 @@ TimeoutStartSec=1000
 [Install]
 WantedBy=default.target
 EOF
+
+    if [[ "${DEPLOY}" =~ ^[Yy]$ ]]; then
+        sed -i "s|^Volume=.*sites/default/files:Z|Volume=$(pwd)/${repo}:/opt/drupal:rw|" ~/.config/containers/systemd/${SITE_SERVICE}.container
+    fi
 
     echo "Building Service to ~/.config/systemd/user/${SITE_SERVICE}.service"
     systemctl --user daemon-reload
@@ -527,7 +539,7 @@ handleFailure() {
         podman container rm $site_container
         podman image rm $site_image
 
-        rm -rf ${repo}
+        sudo rm -rf ${repo}
 
         podman secret rm "${SITE_NAME}_mysql_db"
         podman secret rm "${SITE_NAME}_mysql_password"
@@ -543,7 +555,7 @@ handleFailure() {
         podman container rm $site_container
         podman image rm $site_image
 
-        rm -rf ${repo}
+        sudo rm -rf ${repo}
 
         podman secret rm "${SITE_NAME}_mysql_db"
         podman secret rm "${SITE_NAME}_mysql_password"
@@ -599,6 +611,7 @@ SITE_IMAGE=""
 SITE_CONTAINER=""
 SITE_SERVICE=""
 DB_CONFIG="0"
+DEPLOY=""
 
 main() {
 
