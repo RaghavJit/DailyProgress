@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ENV_HOST=${ENV_HOST}
 
 RUN apt update && \
-    apt install -y git unzip && \ 
+    apt install -y git unzip && \
     adduser --disabled-password --gecos "" ${ENV_USR} && \
     unlink /var/www/html 
 
