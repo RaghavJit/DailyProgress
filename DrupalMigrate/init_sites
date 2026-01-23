@@ -1,33 +1,53 @@
 #!/bin/bash
 
+# ============================================================
+# This script automatically sets up Drupal websites
+# It creates databases, builds containers, and starts services
+# ============================================================
+
+
+# ------------------------------------------------------------
+# CHECK IF USER INPUT IS VALID
+# This function makes sure all the information entered is correct
+# before we start building anything
+# ------------------------------------------------------------
 testInput() {
     local user_exists confirm
 
+    # Check if site name is all lowercase and has no spaces
+    # (computers work better with simple names)
     if [[ "$SITE_NAME" != "${SITE_NAME,,}" || "$SITE_NAME" =~ [[:space:]] ]]; then
         echo "Error: Site name must be lowercase only with no spaces."
         exit 1
     fi
 
+    # Check if database name is all lowercase and has no spaces
     if [[ "$SITE_DB_NAME" != "${SITE_DB_NAME,,}" || "$SITE_DB_NAME" =~ [[:space:]] ]]; then
         echo "Error: DB name must be lowercase only with no spaces."
         exit 1
     fi
 
+    # Check if the SQL file (database backup) actually exists on the computer
     if [[ ! -f "$SITE_DB_DUMP" ]]; then
         echo "Error: SQL dump file '$SITE_DB_DUMP' does not exist."
         exit 1
     fi
 
+    # Check if database username is all lowercase and has no spaces
     if [[ "$SITE_DB_USERNAME" != "${SITE_DB_USERNAME,,}" || "$SITE_DB_USERNAME" =~ [[:space:]] ]]; then
         echo "Error: Database username must be lowercase only with no spaces."
         exit 1
     fi
 
+    # Try to connect to MySQL to make sure the password works
+    # (like testing if a key opens a lock before using it)
     if ! sudo mysql -u root -p"$ROOTPASS" -e "SELECT 1;" 2> >(grep -v "Using a password on the command line" >&2); then
         echo "Error: Invalid MySQL root password or MySQL server not running."
         exit 1
     fi
 
+    # Choose the right Dockerfile based on Drupal version
+    # (Drupal 10 and 11 need different setup instructions)
     if [[ "$SITE_VERSION" == "10" ]]; then
         SITE_VERSION="Dockerfile"
     elif [[ "$SITE_VERSION" == "11" ]]; then
@@ -37,12 +57,16 @@ testInput() {
         exit 1
     fi
 
+    # If user wants development mode, use the development version
+    # (development mode lets you edit code and see changes immediately)
     if [[ "$DEPLOY" =~ ^[yY]$ ]]; then
         SITE_VERSION="${SITE_VERSION}.dev"
     fi
 
+    # Check if this database username already exists in MySQL
     user_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SELECT COUNT(*) FROM mysql.user WHERE user='$SITE_DB_USERNAME'" 2> >(grep -v "Using a password on the command line" >&2))
 
+    # If username exists, ask user if they want to use it
     if [[ "$user_exists" -ne 0 ]]; then
         echo "Alert: MySQL user '$SITE_DB_USERNAME' already exists."
         read -r -p "Do you wish to use this username? (y/N): " confirm
@@ -58,29 +82,52 @@ testInput() {
     fi
 }
 
+
+# ------------------------------------------------------------
+# GET INFORMATION FROM USER
+# This function asks the user questions about the website
+# they want to set up (like name, database info, etc.)
+# ------------------------------------------------------------
 getInput() {
 
+    # If we're resuming a previous setup, skip asking questions
+    # (we already have the answers saved)
     if [[ DB_CONFIG -eq 1 ]]; then
         echo "Reading Configuration from sites.json file."
         return 0;
     fi
- 
+
+    # Create temporary variables to hold user answers
     local tmp_rootpass tmp_site_db_username tmp_site_db_name tmp_site_db_dump tmp_site_name tmp_site_version tmp_site_branch tmp_deploy
     local tag confirm tmp_repo branches
 
+    # Keep asking until user confirms everything is correct
     while true; do
+        # Ask for MySQL password (hidden when typing for security)
         read -s -p "Enter MySQL root password: " tmp_rootpass
         echo
+
+        # Ask for basic site information
         echo "!! Kindly use lowercase for naming and don't include white spaces !!"
         read -r -p "Enter name of the site: " tmp_site_name
         read -r -p "Enter name of site database: " tmp_site_db_name
+
+        # Add today's date to database name (helps track which version we're using)
         read -r -p "Add date tag to database name? [default: _$(date +%Y_%m_%d)]: " tag
         tag=${tag:-_$(date +%Y_%m_%d)}
         tmp_site_db_name="${tmp_site_db_name}${tag}"
+
+        # Ask for database user and file location
         read -r -p "Enter database username you wish to use: " tmp_site_db_username
         read -r -p "Enter path to SQL dumpfile for site: " tmp_site_db_dump
+
+        # Ask which version of Drupal to use
         read -r -p "Choose Drupal version for site (10, 11): " tmp_site_version
+
+        # Ask if they want development mode (for testing and editing code)
         read -r -p "Do you want to deploy in development mode? (Y/n): " tmp_deploy
+
+        # Get the code repository information from sites.json file
         echo "Select a branch to clone from the below options:"
 
         mapfile -t lines < <(
@@ -90,14 +137,17 @@ getInput() {
             ' sites.json
         )
 
+        # Make sure we found the repository
         if [ "${#lines[@]}" -ne 1 ]; then
             echo "Error: Could not extract REPO for $tmp_site_name"
             return 1
         fi
         tmp_repo="${lines[0]}"
-        
+
+        # Get list of all available versions (branches) from the repository
         branches=($(git ls-remote --heads "$tmp_repo" | awk '{print $2}' | sed 's#refs/heads/##'))
 
+        # Let user choose which version they want
         echo "Available branches:"
         select b in "${branches[@]}"; do
             if [[ -n "$b" ]]; then
@@ -108,6 +158,7 @@ getInput() {
             fi
         done
 
+        # Show user everything they entered so they can double-check
         echo "Summary of entered information:"
         echo "Site Name        : $tmp_site_name"
         echo "Site Branch      : $tmp_site_branch"
@@ -121,8 +172,10 @@ getInput() {
         echo "Deployment mode  : ${tmp_deploy}"
         echo
 
+        # Ask if everything looks good
         read -r -p "Is this information correct? (Y/n): " confirm
         if [[ -z "$confirm" || "$confirm" =~ ^[Yy]$ ]]; then
+            # Save all the temporary answers to permanent variables
             ROOTPASS="$tmp_rootpass"
             SITE_NAME="$tmp_site_name"
             SITE_BRANCH="$tmp_site_branch"
@@ -134,26 +187,38 @@ getInput() {
             SITE_CONTAINER="${tmp_site_name}_container"
             SITE_DB_NAME="${tmp_site_db_name}"
             DEPLOY="${tmp_deploy}"
+
+            # Generate a random, secure password for the database
+            # (mix of uppercase, lowercase, numbers, and special characters)
             SITE_DB_PASSWD=$(echo "$(tr -dc 'A-Z' </dev/urandom | head -c 1)$(tr -dc 'a-z' </dev/urandom | head -c 1)$(tr -dc '0-9' </dev/urandom | head -c 1)$(tr -dc '!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 1)$(tr -dc 'A-Za-z0-9!@#$%^&*()_+=-[]{};:,.<>?' </dev/urandom | head -c 31)" | fold -w1 | shuf | tr -d '\n')
 
             echo "Confirmed! Continuing..."
             break
         else
+            # If user says info is wrong, start over
             echo "Trying again..."
             echo
         fi
     done
 
+    # Double-check that all the information is valid
     testInput &&
     echo "Config passed input validation."
 
     return 0
 }
 
+
+# ------------------------------------------------------------
+# SAVE CONFIGURATION TO FILE
+# This function saves all the settings to sites.json
+# (like writing down everything so we remember it later)
+# ------------------------------------------------------------
 updateJSON() {
 
     local tmp_file
 
+    # If we're resuming, we already saved everything before
     if [[ "$DB_CONFIG" -eq 1 ]]; then
         echo "::: Skipping PHASE I :::"
         return 0
@@ -161,8 +226,12 @@ updateJSON() {
 
     echo "::: PHASE I - SITE CONFIGURATION AND SQL DUMP IMPORT :::"
 
+    # Create a temporary file to work with
+    # (like using scratch paper before writing the final copy)
     tmp_file=$(mktemp)
 
+    # Use 'jq' tool to update the JSON file with all our settings
+    # (JSON is a way to store organized information in a file)
     if ! jq --arg site "$SITE_NAME" \
        --arg branch "$SITE_BRANCH" \
        --arg db "$SITE_DB_NAME" \
@@ -191,24 +260,35 @@ updateJSON() {
         return 1
     fi
 
+    # Check if anything actually changed
     if cmp -s sites.json "$tmp_file"; then
         echo "No changes in sites.json"
         rm -f "$tmp_file"
         return 1
     fi
 
+    # Save the new version of the file
     mv "$tmp_file" sites.json
     echo "Config saved to sites.json"
     return 0
 }
 
+
+# ------------------------------------------------------------
+# CREATE DATABASE AND USER IN MYSQL
+# This function sets up a new database and creates a user
+# who can access it (like creating a new filing cabinet
+# and giving someone the key to it)
+# ------------------------------------------------------------
 createUserAndDB() {
 
+    # If we're resuming, the database is already created
     if [[ DB_CONFIG -eq 1 ]]; then
         echo "User and Database already created in previous run."
         return 0;
     fi
 
+    # Check if this database name already exists
     local db_exists
     db_exists=$(sudo mysql -u root -p"$ROOTPASS" -sse "SHOW DATABASES LIKE '$SITE_DB_NAME'" 2> >(grep -v "Using a password on the command line" >&2))
     if [[ $? -ne 0 ]]; then
@@ -216,11 +296,13 @@ createUserAndDB() {
         return 1
     fi
 
+    # If database already exists, don't create it again
     if [[ "$db_exists" == "$SITE_DB_NAME" ]]; then
         echo "Database '$SITE_DB_NAME' already exists. Skipping creation."
         return 0;
     fi
 
+    # Create the database and user in MySQL
     echo "Creating database '$SITE_DB_NAME' and user '$SITE_DB_USERNAME'..."
     if ! sudo mysql -u root -p"$ROOTPASS" 2> >(grep -v "Using a password on the command line" >&2) <<EOF
 CREATE DATABASE \`$SITE_DB_NAME\`;
@@ -236,22 +318,31 @@ EOF
     return 0
 }
 
+
+# ------------------------------------------------------------
+# IMPORT DATABASE BACKUP INTO MYSQL
+# This function loads the website data from a backup file
+# into the database (like restoring files from a backup drive)
+# ------------------------------------------------------------
 importDump() {
     local confirm
 
+    # If resuming, we already imported the data before
     if [[ DB_CONFIG -eq 1 ]]; then
         return 0;
     fi
 
     echo "Importing ${SITE_DB_DUMP} to ${SITE_DB_NAME}"
 
-     
+    # Import the SQL file into the database
+    # (sed removes some lines that might cause problems)
     if ! sudo mysql -u root -p"$ROOTPASS" "$SITE_DB_NAME" < <(sed -e '/^CREATE DATABASE/d' -e '/^USE /d' "$SITE_DB_DUMP") 2> >(grep -v "Using a password on the command line" >&2); then
 
         echo "ERROR: SQL Dump import failed."
         return 1
-    fi    
+    fi
 
+    # Phase 1 is done! Ask if user wants to continue to Phase 2
     echo "::: PHASE I - Completed successfully :::"
     read -r -p "Continue to PHASE II? (Y/n): " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -261,11 +352,18 @@ importDump() {
     return 0;
 }
 
+
+# ------------------------------------------------------------
+# DOWNLOAD WEBSITE CODE FROM REPOSITORY
+# This function downloads the website code from GitHub
+# (like downloading files from cloud storage)
+# ------------------------------------------------------------
 cloneRepo() {
     local repo branch
 
     echo "::: PHASE II - BUILDING IMAGE AND CONTAINER :::"
 
+    # Read the repository URL and branch name from sites.json
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
@@ -273,6 +371,7 @@ cloneRepo() {
         ' sites.json
     )
 
+    # Make sure we got both pieces of information
     if [ "${#lines[@]}" -ne 2 ]; then
         echo "Error: Could not extract all 2 fields for $SITE_NAME"
         return 1
@@ -281,7 +380,10 @@ cloneRepo() {
     repo="${lines[0]}"
     branch="${lines[1]}"
 
+    # Delete old copy if it exists (start fresh)
     rm -rf $(echo "$repo" | awk -F'/' '{gsub(/\.git$/, "", $NF); print $NF}')
+
+    # Download the code from the repository
     if ! git clone --branch ${branch} ${repo}; then
         echo "Error: Git clone failed"
         return 1;
@@ -291,21 +393,30 @@ cloneRepo() {
 
 }
 
+
+# ------------------------------------------------------------
+# CREATE STORAGE VOLUME
+# This function creates a storage space for uploaded files
+# (like creating a folder where users can save their pictures)
+# ------------------------------------------------------------
 createVolume() {
     local confirm
     local custom_name
 
-
+    # Set the default volume name
     SITE_VOLUME="${SITE_NAME}_volume"
 
+    # Check if a volume already exists
     if podman volume exists "$SITE_VOLUME"; then
         echo "Persistent volume '$SITE_VOLUME' already exists."
     else
         echo "Persistent volume for site '$SITE_NAME' does not exist."
     fi
 
+    # Ask user if they want to create a new volume
     read -r -p "Do you want to create and use a new volume? [y/N]: " confirm
     if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        # Let user choose a custom name or use default
         read -r -p "Enter custom volume name [default: $SITE_VOLUME]: " custom_name
         SITE_VOLUME="${custom_name:-$SITE_VOLUME}"
         podman volume create "$SITE_VOLUME"
@@ -315,12 +426,19 @@ createVolume() {
     fi
 }
 
+
+# ------------------------------------------------------------
+# BUILD CONTAINER IMAGE
+# This function creates a "blueprint" for the website container
+# (like making a recipe that says exactly how to set up the website)
+# ------------------------------------------------------------
 createImage() {
     local port repo db_user site_image confirm
     local lines
 
     echo "SITE_NAME: $SITE_NAME"
 
+    # Get all the information we need from sites.json
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
@@ -328,6 +446,7 @@ createImage() {
         ' sites.json
     )
 
+    # Make sure we got everything
     if [ "${#lines[@]}" -ne 4 ]; then
         echo "Error: Could not extract all 4 fields for $SITE_NAME"
         return 1
@@ -338,16 +457,20 @@ createImage() {
     db_user="${lines[2]}"
     site_image="${lines[3]}"
 
+    # Clean up the repository name
     repo=$(echo "$repo" | awk -F'/' '{gsub(/\.git$/, "", $NF); print $NF}')
 
     SITE_IMAGE=$site_image
 
+    # Show user what we're building
     echo "Building Podman image with:"
     echo "Site Image Name  : $SITE_IMAGE"
     echo "Database Username: $db_user"
     echo "Repository       : $repo"
     echo
 
+    # Build the container image using Podman
+    # (this might take a few minutes - like baking a cake)
     if podman build -t "$SITE_IMAGE" -f "$SITE_VERSION" . \
         --build-arg REPO_DIR="$repo" \
         --build-arg ENV_USR="$db_user" \
@@ -359,9 +482,17 @@ createImage() {
     fi
 }
 
+
+# ------------------------------------------------------------
+# STORE SECRETS SECURELY
+# This function hides sensitive information (passwords, database names)
+# in a secure way so the website can access them without showing
+# them to everyone (like putting passwords in a locked safe)
+# ------------------------------------------------------------
 makePodmanSecrets() {
     local db_name db_pass
-     
+
+    # Get the database name and password from sites.json
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
@@ -369,6 +500,7 @@ makePodmanSecrets() {
         ' sites.json
     )
 
+    # Make sure we got both pieces of information
     if [ "${#lines[@]}" -ne 2 ]; then
         echo "Error: Could not extract all 2 fields for $SITE_NAME"
         return 1
@@ -377,6 +509,7 @@ makePodmanSecrets() {
     db_name="${lines[0]}"
     db_pass="${lines[1]}"
 
+    # Create secure storage for database name and password
     echo "Making Podman secrets..."
     if ! printf "%s" "$db_name" | podman secret create "${SITE_NAME}_mysql_db" -; then
         echo "ERROR: Failed to create secret ${SITE_NAME}_mysql_db"
@@ -386,13 +519,21 @@ makePodmanSecrets() {
         echo "ERROR: Failed to create secret ${SITE_NAME}_mysql_password"
         return 1
     fi
-    
+
     return 0;
 }
 
+
+# ------------------------------------------------------------
+# START THE WEBSITE CONTAINER
+# This function creates and starts the website
+# It also sets it up to start automatically when computer restarts
+# (like installing an app and making it open on startup)
+# ------------------------------------------------------------
 runContainer() {
     local port site_service site_image site_container repo
 
+    # Get all the information we need from sites.json
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
@@ -400,6 +541,7 @@ runContainer() {
         ' sites.json
     )
 
+    # Make sure we got everything
     if [ "${#lines[@]}" -ne 5 ]; then
         echo "Error: Could not extract all 4 fields for $SITE_NAME to build container."
         return 1
@@ -411,6 +553,7 @@ runContainer() {
     repo="${lines[3]}"
     site_service="${lines[4]}"
 
+    # Clean up repository name
     repo=$(echo "$repo" | awk -F'/' '{gsub(/\.git$/, "", $NF); print $NF}')
 
     PORT=$port
@@ -418,8 +561,11 @@ runContainer() {
     SITE_CONTAINER=$site_container
     SITE_SERVICE=$site_service
 
+    # Create folder for container configuration files
     mkdir -p ~/.config/containers/systemd
 
+    # Create container configuration file
+    # This file tells the system how to run the website
     echo "Writing container file to ~/.config/containers/systemd/${SITE_SERVICE}.container"
     cat > ~/.config/containers/systemd/${SITE_SERVICE}.container <<EOF
 [Unit]
@@ -444,32 +590,46 @@ TimeoutStartSec=1000
 WantedBy=default.target
 EOF
 
+    # If development mode, use the local code folder instead of volume
+    # (so changes to code show up immediately)
     if [[ "${DEPLOY}" =~ ^[Yy]$ ]]; then
         sed -i "s|^Volume=.*sites/default/files:Z|Volume=$(pwd)/${repo}:/opt/drupal:rw|" ~/.config/containers/systemd/${SITE_SERVICE}.container
     fi
 
+    # Create systemd service (this makes the website start automatically)
     echo "Building Service to ~/.config/systemd/user/${SITE_SERVICE}.service"
     systemctl --user daemon-reload
     mkdir -p ~/.config/systemd/user
     cp /run/user/$(id -u)/systemd/generator/${site_service}.service ~/.config/systemd/user/
 
+    # Add the secure secrets (passwords) to the service
     echo "Adding Podman Secrets to service file"
     systemctl --user daemon-reload
     sed -i "/^ExecStart=/ s|\(${SITE_IMAGE}:latest\)| --secret ${SITE_NAME}_mysql_db,type=env,target=ENV_DB --secret ${SITE_NAME}_mysql_password,type=env,target=ENV_PSWD \1|" ~/.config/systemd/user/${SITE_SERVICE}.service
 
-
+    # Start the website!
     echo "Starting service ${SITE_SERVICE}.service"
 
+    # Enable means "start automatically when computer boots"
     systemctl --user enable ${site_service}.service
+    # Start means "start running now"
     systemctl --user start ${site_service}.service
 
     return 0
 }
 
+
+# ------------------------------------------------------------
+# CLEAN UP AFTER ERRORS
+# This function removes everything if something goes wrong
+# (like cleaning up a mess when a cooking recipe fails)
+# It can delete just some parts or everything, depending on what failed
+# ------------------------------------------------------------
 handleFailure() {
     local port repo db_name db_user db_pass site_image site_container site_service confirm
     local lines status
 
+    # Get all the information about what was created
     mapfile -t lines < <(
         jq -r --arg site_name "$SITE_NAME" '
           .[] | select(.SITE_NAME == $site_name) |
@@ -493,6 +653,7 @@ handleFailure() {
 
     repo=$(echo "$repo" | awk -F'/' '{gsub(/\.git$/, "", $NF); print $NF}')
 
+    # User explicitly wants to delete everything (--delete flag)
     if [[ $DB_CONFIG -eq 2 ]]; then
         echo "This will delete the following:"
         echo "1. Configuration in sites.json"
@@ -505,6 +666,8 @@ handleFailure() {
             echo "No action taken"
             return 0;
         fi
+
+    # Error happened in Phase 2 (building container/image)
     elif [[ $DB_CONFIG -eq 1 ]]; then
         echo "Some error occurred during PHASE II choose what to delete"
         echo "OPTION: Y will delete"
@@ -518,7 +681,9 @@ handleFailure() {
         echo "4. Container"
         echo "5. Systemd service to auto restart container"
         read -p "Choose action: " confirm
-    elif [[ $DB_CONFIG -eq 0 ]]; then 
+
+    # Error happened in Phase 1 (database setup)
+    elif [[ $DB_CONFIG -eq 0 ]]; then
         echo "Error occurred, check input and try again. Would you like to deleting all changes (Y/n): " confirm
         if [[ "$confirm" =~ ^[Nn]$ ]]; then
             echo "Faulty site not deleted"
@@ -526,40 +691,57 @@ handleFailure() {
         fi
     fi
 
-
+    # If error in Phase 2 and user chose Y: delete only container/image stuff
     if [[ $DB_CONFIG -eq 1 && "$confirm" =~ ^[Yy]$ ]]; then
+        # Stop and disable the automatic startup service
         systemctl --user disable ${site_service}
         systemctl --user stop ${site_service}
 
+        # Delete service configuration files
         rm /run/user/$(id -u)/systemd/generator/${site_service}.service
         rm ${HOME}/.config/containers/systemd/${site_service}.container
         rm ${HOME}/.config/systemd/user/${site_service}.service
 
+        # Stop and remove the container
         podman container stop $site_container
         podman container rm $site_container
+
+        # Remove the image we built
         podman image rm $site_image
 
+        # Delete downloaded code
         sudo rm -rf ${repo}
 
+        # Remove stored secrets
         podman secret rm "${SITE_NAME}_mysql_db"
         podman secret rm "${SITE_NAME}_mysql_password"
+
+    # Delete everything (database + container + configuration)
     else
+        # Stop and disable the automatic startup service
         systemctl --user disable ${site_service}
         systemctl --user stop ${site_service}
 
+        # Delete service configuration files
         rm /run/user/$(id -u)/systemd/generator/${site_service}.service
         rm ${HOME}/.config/containers/systemd/${site_service}.container
         rm ${HOME}/.config/systemd/user/${site_service}.service
 
+        # Stop and remove the container
         podman container stop $site_container
         podman container rm $site_container
+
+        # Remove the image we built
         podman image rm $site_image
 
+        # Delete downloaded code
         sudo rm -rf ${repo}
 
+        # Remove stored secrets
         podman secret rm "${SITE_NAME}_mysql_db"
         podman secret rm "${SITE_NAME}_mysql_password"
 
+        # Delete the database and user from MySQL
         while true; do
             sudo mysql -u root -p"$ROOTPASS" \
                 2> >(grep -v "Using a password on the command line" >&2) <<EOF
@@ -575,6 +757,8 @@ EOF
             break
         done
 
+        # Clear the configuration from sites.json
+        # (set all fields to empty)
         jq --arg site "$SITE_NAME" \
            --arg db "" \
            --arg user "" \
@@ -598,27 +782,44 @@ EOF
     fi
 }
 
-PORT=""
-REPO=""
-SITE_BRANCH=""
-SITE_NAME=""
-SITE_VERSION=""
-SITE_DB_NAME=""
-SITE_DB_USERNAME=""
-SITE_DB_PASSWD=""
-SITE_VOLUME=""
-SITE_IMAGE=""
-SITE_CONTAINER=""
-SITE_SERVICE=""
-DB_CONFIG="0"
-DEPLOY=""
 
+# ============================================================
+# GLOBAL VARIABLES
+# These variables store all the important information
+# about the website we're setting up
+# ============================================================
+
+PORT=""                 # Which port the website will use (like apartment number)
+REPO=""                 # Where to download the website code from
+SITE_BRANCH=""          # Which version of the code to use
+SITE_NAME=""            # Name of the website
+SITE_VERSION=""         # Drupal version (10 or 11)
+SITE_DB_NAME=""         # Name of the database
+SITE_DB_USERNAME=""     # Username to access the database
+SITE_DB_PASSWD=""       # Password to access the database
+SITE_VOLUME=""          # Storage space for uploaded files
+SITE_IMAGE=""           # Name of the container blueprint
+SITE_CONTAINER=""       # Name of the running container
+SITE_SERVICE=""         # Name of the automatic startup service
+DB_CONFIG="0"           # Tracks which phase we're in (0=new, 1=resume, 2=delete)
+DEPLOY=""               # Whether we're in development mode
+
+
+# ============================================================
+# MAIN FUNCTION
+# This is where the script starts running
+# It runs all the other functions in order
+# ============================================================
 main() {
 
+    # Check if user wants to resume a previous setup
+    # (skip Phase 1 and just rebuild container/image)
     if [[ $1 == "--resume" || $1 == "-r" ]]; then
         shift
         DB_CONFIG=1
         SITE_NAME=$1
+
+    # Check if user wants to delete an existing site
     elif [[ $1 == "--delete" || $1 == "-d" ]]; then
         shift
         DB_CONFIG=2
@@ -627,22 +828,32 @@ main() {
         return 0;
     fi
 
+    # Run all the setup steps in order
+    # The && means "only continue if the previous step worked"
+    # If any step fails, jump to the error handling section
     {
-        getInput &&
-        updateJSON &&
-        createUserAndDB &&
-        importDump &&
-        cloneRepo &&
-        createVolume &&
-        createImage && 
-        makePodmanSecrets &&
-        runContainer &&
+        getInput &&            # Ask user for information
+        updateJSON &&          # Save information to file
+        createUserAndDB &&     # Set up database
+        importDump &&          # Load website data into database
+        cloneRepo &&           # Download website code
+        createVolume &&        # Create storage space
+        createImage &&         # Build container image
+        makePodmanSecrets &&   # Store passwords securely
+        runContainer &&        # Start the website
         echo "::: Operation complete :::"
     } || {
+        # If anything went wrong, run cleanup
         echo "!!! Operation Failed !!!"
         handleFailure
     }
 }
 
+
+# ============================================================
+# START THE SCRIPT
+# 'time' shows how long the whole process took
+# "$@" passes any command-line arguments to main function
+# ============================================================
 time main "$@"
 
