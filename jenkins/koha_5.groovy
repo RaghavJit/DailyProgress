@@ -1,0 +1,264 @@
+pipeline {
+    agent any
+
+    environment {
+        ROOTPASS        = credentials('mysql')
+        SITE_DB_PASSWD  = credentials('koha_user_password')
+    }
+
+    stages {
+
+        stage ('Stop site') {
+            steps {
+                sh ''' 
+                    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+                    export DBUS_SESSION_BUS_ADDRESS="unix:path=\${XDG_RUNTIME_DIR}/bus"
+
+                    systemctl --user disable koha.service || true
+                    systemctl --user stop koha.service || true
+                '''
+            }
+        }
+
+        stage ('Clone Repo') {
+            steps {
+                dir('koha_repo') {
+                    checkout scmGit(
+                        branches: [[name: '*/main']], 
+                        extensions: [], 
+                        userRemoteConfigs: [[
+                            url: 'https://github.com/FOSSEE/koha-2025'
+                            ]]
+                        )
+                    }
+             }
+        }
+
+        stage ('Clone DB') {
+            steps {
+                dir('koha_db') {
+                    checkout scmGit(
+                        branches: [[name: '*/main']],
+                        userRemoteConfigs: [[
+                            credentialsId: 'koha',
+                            url: 'https://github.com/RaghavJit/koha_db'
+                        ]]
+                    )
+                }
+            }
+        }
+
+        stage ('Create new MySQL DB') {
+            steps {
+                script {
+                    sh "git config --global --add safe.directory ${WORKSPACE}/koha_repo"
+                    def commitMsg = sh(
+                        script: "git -C ${WORKSPACE}/koha_repo log -1 --pretty=%B",
+                        returnStdout: true
+                    ).trim()
+                    
+                    if (commitMsg.toLowerCase().contains("build live")) {
+                        echo "Reusing old DB"
+                    }
+                    else {
+                        sh '''
+                            set -e
+
+                            echo $ROOTPASS
+                            echo $SITE_DB_PASSWD
+
+                            db_list=$(mysql -u root -p"$ROOTPASS" --silent --skip-column-names \
+                                -e "SHOW DATABASES LIKE 'koha_db_jenkins_%';")
+
+                            if [ -n "$db_list" ]; then
+                                while IFS= read -r db; do
+                                    suffix="${db#koha_db_jenkins_}"
+                                    user="koha_user_jenkins_$suffix"
+
+                                    mysql -u root -p"$ROOTPASS" <<EOF
+DROP DATABASE IF EXISTS $db;
+DROP USER IF EXISTS '$user'@'localhost';
+EOF
+                                done <<< "$db_list"
+
+                                mysql -u root -p"$ROOTPASS" -e "FLUSH PRIVILEGES;"
+                            fi
+
+                            newdb="koha_db_jenkins_${BUILD_NUMBER}"
+                            newuser="koha_user_jenkins_6783"
+
+                            mysql -u root -p"$ROOTPASS" <<EOF
+CREATE DATABASE IF NOT EXISTS $newdb;
+CREATE USER IF NOT EXISTS '$newuser'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
+GRANT ALL PRIVILEGES ON $newdb.* TO '$newuser'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+
+                            if [ -f "koha_db/koha_10.sql" ]; then
+                                rm -rf /tmp/koha_clean.sql
+                                sed -e '/^CREATE DATABASE/d' -e '/^USE[[:space:]]/d' koha_db/koha_10.sql > /tmp/koha_clean.sql
+                                mysql -u "$newuser" -p"$SITE_DB_PASSWD" "$newdb" < /tmp/koha_clean.sql
+
+                            else 
+                                echo 'No file koha_10.sql found'
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Mount Volume') { 
+            steps { 
+                script { 
+                    sh "git config --global --add safe.directory ${WORKSPACE}/koha_repo"
+                    
+                    def commitMsg = sh(
+                        script: "git -C ${WORKSPACE}/koha_repo log -1 --pretty=%B",
+                        returnStdout: true
+                    ).trim()
+
+                    if (commitMsg.toLowerCase().contains("build live")) {
+                        echo "Reusing old volume (koha_vol)"
+                    } 
+                    else {
+                        echo "Recreating Podman Volume: koha_vol"
+                        sh '''
+                            if podman volume inspect koha_vol >/dev/null 2>&1; then
+                                podman volume rm -f koha_vol
+                            fi
+
+                            podman volume create koha_vol
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage ('Fetch Dockerfile') {
+            steps {
+                dir('dockerfile_only') {
+                    sh """
+                        rm -rf .git
+                        git init
+                        git remote add origin https://github.com/RaghavJit/DailyProgress
+                        git config core.sparseCheckout true
+                        echo "DrupalMigrate/Dockerfile" > .git/info/sparse-checkout
+                        git pull origin automated --depth=1
+                        cp DrupalMigrate/Dockerfile "${WORKSPACE}/Dockerfile"
+                    """
+                }
+            }
+        }
+
+        stage ('Build Image') {
+            steps {
+                sh 'podman image ls --format "{{.Repository}}" | grep "^koha" | xargs -r podman image rm'
+                sh """
+                    podman build \
+                        -t koha_image:latest \
+                        -f "${WORKSPACE}/Dockerfile" \
+                        --build-arg ENV_USR="koha_user_jenkins_6783" \
+                        --build-arg REPO_DIR="koha_repo" \
+                        --build-arg ENV_HOST="10.0.2.2" \
+                        "${WORKSPACE}"
+                """
+            }
+        }
+
+        stage('Podman Secrets') {
+            steps {
+                script {
+                    sh "git config --global --add safe.directory ${WORKSPACE}/koha_repo"
+
+                    def commitMsg = sh(
+                        script: "git -C ${WORKSPACE}/koha_repo log -1 --pretty=%B",
+                        returnStdout: true
+                    ).trim()
+
+                    if (commitMsg.toLowerCase().contains("build live")) {
+                        echo "Reusing old secrets"
+                    }
+                    else {
+                        sh """
+                            set -e
+
+                            podman secret rm koha_mysql_db || true
+                            podman secret rm koha_mysql_password || true
+
+                            printf "koha_db_jenkins_${BUILD_NUMBER}" | podman secret create koha_mysql_db -
+                            printf "${SITE_DB_PASSWD}" | podman secret create koha_mysql_password -
+                        """
+                    }
+                }
+            }
+        }
+
+        stage ('Podman SystemD generator') {
+            steps {
+                script {
+                    sh '''
+                    set -e
+
+                    echo "Exporing XDG and DBUS vars"
+                    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+                    export DBUS_SESSION_BUS_ADDRESS="unix:path=\${XDG_RUNTIME_DIR}/bus"
+
+                    systemctl --user disable koha.service || true
+                    systemctl --user stop koha.service || true
+
+                    mkdir -p ~/.config/containers/systemd
+
+
+                    cat > ~/.config/containers/systemd/koha.container <<EOF
+[Unit]
+Description=koha Persist Container
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=koha_image:latest
+Pull=never
+AddCapability=NET_RAW
+ContainerName=koha_container
+PublishPort=9105:80
+Volume=koha_vol:/var/www/html/sites/default/files:Z
+Network=slirp4netns:allow_host_loopback=true
+
+[Service]
+Restart=unless-stopped
+TimeoutStartSec=1000
+
+[Install]
+WantedBy=default.target
+EOF
+
+                    systemctl --user daemon-reload || true
+
+                    mkdir -p ~/.config/systemd/user
+                    cp /run/user/$(id -u)/systemd/generator/koha.service ~/.config/systemd/user/ || true
+
+                    echo "Adding Podman Secrets to service file"
+                    sed -i 's|podman run|podman run --secret koha_mysql_db,type=env,target=ENV_DB --secret koha_mysql_password,type=env,target=ENV_PSWD|' ~/.config/systemd/user/koha.service
+                    systemctl --user daemon-reload || true
+                    systemctl --user enable koha || true
+                    systemctl --user start koha || true
+                    '''
+                }
+            }
+        }
+
+        stage('Mail enable') {
+            steps {
+                sh '''
+                    podman exec koha_container apt update
+                    podman exec koha_container apt install mailutils ssmtp -y
+                    
+                    podman exec koha_container sh -c 'echo "mailhub=10.0.2.2:25" > /etc/ssmtp/ssmtp.conf'
+                    podman exec koha_container sh -c 'echo "root:root@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases'
+                    podman exec koha_container sh -c 'echo "'${ENV_USR}':'${ENV_USR}'@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases'
+                '''
+            }
+        }
+    }
+}

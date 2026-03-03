@@ -4,4 +4,4 @@ apt update && apt install mailutils ssmtp
 
 echo "mailhub=10.0.2.2:25" > /etc/ssmtp/ssmtp.conf
 echo "root:root@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases
-echo "${ENV_USR}:${ENV_USR}@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliase
+echo "${ENV_USR}:${ENV_USR}@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases
