@@ -15,7 +15,7 @@ RUN apt update && \
 COPY ${REPO_DIR}/ .
 
 RUN ln -s /opt/drupal /var/www/html && \
-    composer update --no-cache --no-dev --no-interaction --no-progress && \
+    composer install
     curl -s https://static.fossee.in/IT/drupal_fix_permissions.sh | bash -s -- -u=${ENV_USR}
 
 EXPOSE 80
