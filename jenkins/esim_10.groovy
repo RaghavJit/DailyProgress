@@ -57,8 +57,8 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old DB"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing latest DB"
                     }
                     else {
                         sh '''
@@ -118,17 +118,17 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old volume (esim_vol)"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing old uploads folder (osdag_uploads and osdag_public)"
                     } 
                     else {
-                        echo "Recreating Podman Volume: esim_vol"
+                        echo "Recreating Podman Mount directory"
                         sh '''
-                            if podman volume inspect esim_vol >/dev/null 2>&1; then
-                                podman volume rm -f esim_vol
-                            fi
-
-                            podman volume create esim_vol
+                            mv /var/lib/jenkins/site_directories/esim_uploads /var/lib/jenkins/site_directories/esim_uploads.${BUILD_NUMBER}
+                            mv /var/lib/jenkins/site_directories/esim_public /var/lib/jenkins/site_directories/esim_public.${BUILD_NUMBER}
+                            mkdir -p /var/lib/jenkins/site_directories/esim_uploads
+                            mkdir -p /var/lib/jenkins/site_directories/esim_public
+                            mkdir -p /var/lib/jenkins/site_directories/lm_sample_code
                         '''
                     }
                 }
@@ -176,8 +176,8 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old secrets"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing latest secrets"
                     }
                     else {
                         sh """
@@ -222,7 +222,9 @@ Pull=never
 AddCapability=NET_RAW
 ContainerName=esim_container
 PublishPort=9110:80
-Volume=esim_vol:/var/www/html/sites/default/files:Z
+Volume=/var/lib/jenkins/site_directories/esim_public:/var/www/html/sites/default/files:Z
+Volume=/var/lib/jenkins/site_directories/esim_uploads:/var/www/html/esim_uploads:Z
+Volume=/var/lib/jenkins/site_directories/esim_lm_sample_code:/var/www/html/lm_sample_code:Z
 Network=slirp4netns:allow_host_loopback=true
 
 [Service]

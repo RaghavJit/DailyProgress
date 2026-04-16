@@ -57,8 +57,8 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old DB"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing latest DB"
                     }
                     else {
                         sh '''
@@ -118,17 +118,16 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old volume (cfd_vol)"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing old uploads folder (osdag_uploads and osdag_public)"
                     } 
                     else {
-                        echo "Recreating Podman Volume: cfd_vol"
+                        echo "Recreating Podman Mount directory"
                         sh '''
-                            if podman volume inspect cfd_vol >/dev/null 2>&1; then
-                                podman volume rm -f cfd_vol
-                            fi
-
-                            podman volume create cfd_vol
+                            mv /var/lib/jenkins/site_directories/cfd_uploads /var/lib/jenkins/site_directories/cfd_uploads.${BUILD_NUMBER}
+                            mv /var/lib/jenkins/site_directories/cfd_public /var/lib/jenkins/site_directories/cfd_public.${BUILD_NUMBER}
+                            mkdir -p /var/lib/jenkins/site_directories/cfd_uploads
+                            mkdir -p /var/lib/jenkins/site_directories/cfd_public
                         '''
                     }
                 }
@@ -176,8 +175,8 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old secrets"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing latest secrets"
                     }
                     else {
                         sh """
@@ -222,7 +221,8 @@ Pull=never
 AddCapability=NET_RAW
 ContainerName=cfd_container
 PublishPort=9109:80
-Volume=cfd_vol:/var/www/html/sites/default/files:Z
+Volume=/var/lib/jenkins/site_directories/cfd_public:/var/www/html/sites/default/files:Z
+Volume=/var/lib/jenkins/site_directories/cfd_uploads:/var/www/html/cfd_uploads:Z
 Network=slirp4netns:allow_host_loopback=true
 
 [Service]
@@ -262,3 +262,4 @@ EOF
         }
     }
 }
+

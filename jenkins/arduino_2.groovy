@@ -57,8 +57,8 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old DB"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing latest DB"
                     }
                     else {
                         sh '''
@@ -118,17 +118,16 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old volume (arduino_vol)"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing old uploads folder (osdag_uploads and osdag_public)"
                     } 
                     else {
-                        echo "Recreating Podman Volume: arduino_vol"
+                        echo "Recreating Podman Mount directory"
                         sh '''
-                            if podman volume inspect arduino_vol >/dev/null 2>&1; then
-                                podman volume rm -f arduino_vol
-                            fi
-
-                            podman volume create arduino_vol
+                            mv /var/lib/jenkins/site_directories/arduino_uploads /var/lib/jenkins/site_directories/arduino_uploads.${BUILD_NUMBER}
+                            mv /var/lib/jenkins/site_directories/arduino_public /var/lib/jenkins/site_directories/arduino_public.${BUILD_NUMBER}
+                            mkdir -p /var/lib/jenkins/site_directories/arduino_uploads
+                            mkdir -p /var/lib/jenkins/site_directories/arduino_public
                         '''
                     }
                 }
@@ -176,8 +175,8 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old secrets"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing latest secrets"
                     }
                     else {
                         sh """
@@ -222,7 +221,8 @@ Pull=never
 AddCapability=NET_RAW
 ContainerName=arduino_container
 PublishPort=9102:80
-Volume=arduino_vol:/var/www/html/sites/default/files:Z
+Volume=/var/lib/jenkins/site_directories/arduino_public:/var/www/html/sites/default/files:Z
+Volume=/var/lib/jenkins/site_directories/arduino_uploads:/var/www/html/arduino_uploads:Z
 Network=slirp4netns:allow_host_loopback=true
 
 [Service]

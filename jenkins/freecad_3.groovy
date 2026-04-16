@@ -57,8 +57,8 @@ pipeline {
                         returnStdout: true
                     ).trim()
                     
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old DB"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing latest DB"
                     }
                     else {
                         sh '''
@@ -118,17 +118,16 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old volume (freecad_vol)"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing old uploads folder (osdag_uploads and osdag_public)"
                     } 
                     else {
-                        echo "Recreating Podman Volume: freecad_vol"
+                        echo "Recreating Podman Mount directory"
                         sh '''
-                            if podman volume inspect freecad_vol >/dev/null 2>&1; then
-                                podman volume rm -f freecad_vol
-                            fi
-
-                            podman volume create freecad_vol
+                            mv /var/lib/jenkins/site_directories/freecad_uploads /var/lib/jenkins/site_directories/freecad_uploads.${BUILD_NUMBER}
+                            mv /var/lib/jenkins/site_directories/freecad_public /var/lib/jenkins/site_directories/freecad_public.${BUILD_NUMBER}
+                            mkdir -p /var/lib/jenkins/site_directories/freecad_uploads
+                            mkdir -p /var/lib/jenkins/site_directories/freecad_public
                         '''
                     }
                 }
@@ -176,8 +175,8 @@ EOF
                         returnStdout: true
                     ).trim()
 
-                    if (commitMsg.toLowerCase().contains("build live")) {
-                        echo "Reusing old secrets"
+                    if (!commitMsg.toLowerCase().contains("build clean")) {
+                        echo "Reusing latest secrets"
                     }
                     else {
                         sh """
@@ -222,7 +221,8 @@ Pull=never
 AddCapability=NET_RAW
 ContainerName=freecad_container
 PublishPort=9103:80
-Volume=freecad_vol:/var/www/html/sites/default/files:Z
+Volume=/var/lib/jenkins/site_directories/freecad_public:/var/www/html/sites/default/files:Z
+Volume=/var/lib/jenkins/site_directories/freecad_uploads:/var/www/html/freecad_uploads:Z
 Network=slirp4netns:allow_host_loopback=true
 
 [Service]
@@ -262,3 +262,4 @@ EOF
         }
     }
 }
+
