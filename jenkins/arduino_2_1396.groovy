@@ -3,10 +3,26 @@ pipeline {
 
     environment {
         ROOTPASS        = credentials('mysql')
+        SITE_DB_USER    = 'arduino_user_jenkins_1396' 
         SITE_DB_PASSWD  = credentials('arduino_user_password')
     }
 
+    parameters {
+        booleanParam(
+            name: 'UPDATE_PUBLIC',
+            defaultValue: true,
+            description: 'Select when new content is added in site/default/files directory of GitHub repository.<br>When true this will copy the contents to the container.'
+        )
+
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['DEVELOPMENT', 'PRODUCTION'],
+            description: 'PRODUCTION: Reuse existing database and mounted folders<br>DEVELOPMENT: Create fresh database and mount empty folders'
+        )
+    }
+
     stages {
+
 
         stage ('Stop site') {
             steps {
@@ -19,121 +35,115 @@ pipeline {
                 '''
             }
         }
-
-        stage ('Clone Repo') {
+        stage('Clone Repo') {
             steps {
                 dir('arduino_repo') {
                     checkout scmGit(
                         branches: [[name: '*/main']], 
                         extensions: [], 
-                        userRemoteConfigs: [[
-                            url: 'https://github.com/FOSSEE/arduino10_drupal_docker'
-                            ]]
-                        )
-                    }
-             }
-        }
+                        userRemoteConfigs: [[url: 'https://github.com/FOSSEE/arduino10_drupal_docker']]
+                    )
+                }
 
+                script {
+                    if (params.UPDATE_PUBLIC) {
+                        sh '''
+                            mkdir -p "$WORKSPACE/../../site_directories/arduino_public/"
+                            mkdir -p "$WORKSPACE/../../site_directories/arduino_uploads/"
+                            
+                            if [ -d "arduino_repo/sites/default/files" ]; then
+                                cp -r arduino_repo/sites/default/files/. "$WORKSPACE/../../site_directories/arduino_public/"
+                            else
+                                echo "Source directory does not exist"
+                            fi
+                        '''
+                    } 
+                    else {
+                        echo "Content from site repo will not be copied to public dir of site"
+                    }
+                }
+            }
+        }
         stage ('Clone DB') {
             steps {
                 dir('arduino_db') {
                     checkout scmGit(
                         branches: [[name: '*/main']],
-                        userRemoteConfigs: [[
-                            credentialsId: 'arduino',
-                            url: 'https://github.com/RaghavJit/arduino_db'
-                        ]]
+                        userRemoteConfigs: [[ credentialsId: 'arduino', url: 'https://github.com/RaghavJit/arduino_db' ]]
                     )
                 }
             }
         }
-
-        stage ('Create new MySQL DB') {
+        stage('Create new MySQL DB') {
             steps {
                 script {
-                    sh "git config --global --add safe.directory ${WORKSPACE}/arduino_repo"
-                    def commitMsg = sh(
-                        script: "git -C ${WORKSPACE}/arduino_repo log -1 --pretty=%B",
-                        returnStdout: true
-                    ).trim()
-                    
-                    if (!commitMsg.toLowerCase().contains("build clean")) {
-                        echo "Reusing latest DB"
-                    }
-                    else {
+
+                    if (params.ENVIRONMENT == "DEVELOPMENT") {
+
                         sh '''
                             set -e
-
-                            echo $ROOTPASS
-                            echo $SITE_DB_PASSWD
 
                             db_list=$(mysql -u root -p"$ROOTPASS" --silent --skip-column-names \
                                 -e "SHOW DATABASES LIKE 'arduino_db_jenkins_%';")
 
                             if [ -n "$db_list" ]; then
                                 while IFS= read -r db; do
-                                    suffix="${db#arduino_db_jenkins_}"
-                                    user="arduino_user_jenkins_$suffix"
-
                                     mysql -u root -p"$ROOTPASS" <<EOF
 DROP DATABASE IF EXISTS $db;
-DROP USER IF EXISTS '$user'@'localhost';
 EOF
                                 done <<< "$db_list"
-
                                 mysql -u root -p"$ROOTPASS" -e "FLUSH PRIVILEGES;"
                             fi
 
                             newdb="arduino_db_jenkins_${BUILD_NUMBER}"
-                            newuser="arduino_user_jenkins_1396"
 
                             mysql -u root -p"$ROOTPASS" <<EOF
 CREATE DATABASE IF NOT EXISTS $newdb;
-CREATE USER IF NOT EXISTS '$newuser'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
-GRANT ALL PRIVILEGES ON $newdb.* TO '$newuser'@'localhost';
+CREATE USER IF NOT EXISTS '$SITE_DB_USER'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
+GRANT ALL PRIVILEGES ON $newdb.* TO '$SITE_DB_USER'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 
                             if [ -f "arduino_db/arduino_10.sql" ]; then
-                                rm -rf /tmp/arduino_clean.sql
-                                sed -e '/^CREATE DATABASE/d' -e '/^USE[[:space:]]/d' arduino_db/arduino_10.sql > /tmp/arduino_clean.sql
-                                mysql -u "$newuser" -p"$SITE_DB_PASSWD" "$newdb" < /tmp/arduino_clean.sql
+                                sed -e '/^CREATE DATABASE/d' -e '/^USE[[:space:]]/d' \
+                                    arduino_db/arduino_10.sql > /tmp/arduino_clean.sql
 
-                            else 
-                                echo 'No file arduino_10.sql found'
+                                mysql -u "$SITE_DB_USER" -p"$SITE_DB_PASSWD" "$newdb" < /tmp/arduino_clean.sql
                             fi
                         '''
                     }
-                }
-            }
-        }
 
-        stage('Mount Volume') { 
-            steps { 
-                script { 
-                    sh "git config --global --add safe.directory ${WORKSPACE}/arduino_repo"
-                    
-                    def commitMsg = sh(
-                        script: "git -C ${WORKSPACE}/arduino_repo log -1 --pretty=%B",
-                        returnStdout: true
-                    ).trim()
-
-                    if (!commitMsg.toLowerCase().contains("build clean")) {
-                        echo "Reusing old uploads folder (osdag_uploads and osdag_public)"
-                    } 
                     else {
-                        echo "Recreating Podman Mount directory"
+
                         sh '''
-                            mv /var/lib/jenkins/site_directories/arduino_uploads /var/lib/jenkins/site_directories/arduino_uploads.${BUILD_NUMBER}
-                            mv /var/lib/jenkins/site_directories/arduino_public /var/lib/jenkins/site_directories/arduino_public.${BUILD_NUMBER}
-                            mkdir -p /var/lib/jenkins/site_directories/arduino_uploads
-                            mkdir -p /var/lib/jenkins/site_directories/arduino_public
+                            set -e
+
+                            prod_db="arduino_db_jenkins_${BUILD_NUMBER}"
+
+                            exists=$(mysql -u root -p"$ROOTPASS" --silent --skip-column-names \
+                                -e "SHOW DATABASES LIKE '$prod_db';")
+
+                            if [ -z "$exists" ]; then
+                                mysql -u root -p"$ROOTPASS" <<EOF
+CREATE DATABASE $prod_db;
+CREATE USER IF NOT EXISTS '$SITE_DB_USER'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
+GRANT ALL PRIVILEGES ON $prod_db.* TO '$SITE_DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+
+                                if [ -f "arduino_db/arduino_10.sql" ]; then
+                                    sed -e '/^CREATE DATABASE/d' -e '/^USE[[:space:]]/d' \
+                                        arduino_db/arduino_10.sql > /tmp/arduino_clean.sql
+
+                                    mysql -u "$SITE_DB_USER" -p"$SITE_DB_PASSWD" "$prod_db" < /tmp/arduino_clean.sql
+                                fi
+                            fi
                         '''
                     }
+
                 }
             }
         }
-
         stage ('Fetch Dockerfile') {
             steps {
                 dir('dockerfile_only') {
@@ -149,7 +159,6 @@ EOF
                 }
             }
         }
-
         stage ('Build Image') {
             steps {
                 sh 'podman image ls --format "{{.Repository}}" | grep "^arduino" | xargs -r podman image rm'
@@ -164,21 +173,11 @@ EOF
                 """
             }
         }
-
         stage('Podman Secrets') {
             steps {
                 script {
-                    sh "git config --global --add safe.directory ${WORKSPACE}/arduino_repo"
 
-                    def commitMsg = sh(
-                        script: "git -C ${WORKSPACE}/arduino_repo log -1 --pretty=%B",
-                        returnStdout: true
-                    ).trim()
-
-                    if (!commitMsg.toLowerCase().contains("build clean")) {
-                        echo "Reusing latest secrets"
-                    }
-                    else {
+                    if (params.ENVIRONMENT == "DEVELOPMENT") {
                         sh """
                             set -e
 
@@ -189,10 +188,23 @@ EOF
                             printf "${SITE_DB_PASSWD}" | podman secret create arduino_mysql_password -
                         """
                     }
+
+                    else {
+                        sh """
+                            set -e
+
+                            if ! podman secret inspect arduino_mysql_db >/dev/null 2>&1; then
+                                printf "arduino_db_production" | podman secret create arduino_mysql_db -
+                            fi
+
+                            if ! podman secret inspect arduino_mysql_password >/dev/null 2>&1; then
+                                printf "${SITE_DB_PASSWD}" | podman secret create arduino_mysql_password -
+                            fi
+                        """
+                    }
                 }
             }
         }
-
         stage ('Podman SystemD generator') {
             steps {
                 script {
@@ -247,7 +259,6 @@ EOF
                 }
             }
         }
-
         stage('Mail enable') {
             steps {
                 sh '''
@@ -260,5 +271,17 @@ EOF
                 '''
             }
         }
+        stage('Set Permissions') {
+            steps {
+                sh '''
+                    podman exec arduino_container sh -c 'curl -s https://static.fossee.in/IT/drupal_fix_permissions.sh | bash -s -- -u="arduino_user_jenkins_1396"'
+                    podman exec arduino_container sh -c 'chown -R root:www-data /opt/drupal/sites/default/files'
+                    podman exec arduino_container sh -c 'chown -R root:www-data /opt/drupal/arduino_uploads'
+                    podman exec arduino_container sh -c 'chmod -R 770 /opt/drupal/sites/default/files'
+                    podman exec arduino_container sh -c 'chmod -R 770 /opt/drupal/arduino_uploads'
+                '''
+            }
+        }
     }
 }
+

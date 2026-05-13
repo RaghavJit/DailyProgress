@@ -3,10 +3,26 @@ pipeline {
 
     environment {
         ROOTPASS        = credentials('mysql')
+        SITE_DB_USER    = 'osdag_user_jenkins_4577' 
         SITE_DB_PASSWD  = credentials('osdag_user_password')
     }
 
+    parameters {
+        booleanParam(
+            name: 'UPDATE_PUBLIC',
+            defaultValue: true,
+            description: 'Select when new content is added in site/default/files directory of GitHub repository.<br>When true this will copy the contents to the container.'
+        )
+
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['DEVELOPMENT', 'PRODUCTION'],
+            description: 'PRODUCTION: Reuse existing database and mounted folders<br>DEVELOPMENT: Create fresh database and mount empty folders'
+        )
+    }
+
     stages {
+
 
         stage ('Stop site') {
             steps {
@@ -19,121 +35,115 @@ pipeline {
                 '''
             }
         }
-
-        stage ('Clone Repo') {
+        stage('Clone Repo') {
             steps {
                 dir('osdag_repo') {
                     checkout scmGit(
                         branches: [[name: '*/main']], 
                         extensions: [], 
-                        userRemoteConfigs: [[
-                            url: 'https://github.com/FOSSEE/osdag_10_docker_image'
-                            ]]
-                        )
-                    }
-             }
-        }
+                        userRemoteConfigs: [[url: 'https://github.com/FOSSEE/osdag_10_docker_image']]
+                    )
+                }
 
+                script {
+                    if (params.UPDATE_PUBLIC) {
+                        sh '''
+                            mkdir -p "$WORKSPACE/../../site_directories/osdag_public/"
+                            mkdir -p "$WORKSPACE/../../site_directories/osdag_uploads/"
+                            
+                            if [ -d "osdag_repo/sites/default/files" ]; then
+                                cp -r osdag_repo/sites/default/files/. "$WORKSPACE/../../site_directories/osdag_public/"
+                            else
+                                echo "Source directory does not exist"
+                            fi
+                        '''
+                    } 
+                    else {
+                        echo "Content from site repo will not be copied to public dir of site"
+                    }
+                }
+            }
+        }
         stage ('Clone DB') {
             steps {
                 dir('osdag_db') {
                     checkout scmGit(
                         branches: [[name: '*/main']],
-                        userRemoteConfigs: [[
-                            credentialsId: 'osdag',
-                            url: 'https://github.com/RaghavJit/osdag_db'
-                        ]]
+                        userRemoteConfigs: [[ credentialsId: 'osdag', url: 'https://github.com/RaghavJit/osdag_db' ]]
                     )
                 }
             }
         }
-
-        stage ('Create new MySQL DB') {
+        stage('Create new MySQL DB') {
             steps {
                 script {
-                    sh "git config --global --add safe.directory ${WORKSPACE}/osdag_repo"
-                    def commitMsg = sh(
-                        script: "git -C ${WORKSPACE}/osdag_repo log -1 --pretty=%B",
-                        returnStdout: true
-                    ).trim()
-                    
-                    if (!commitMsg.toLowerCase().contains("build clean")) {
-                        echo "Reusing latest DB"
-                    }
-                    else {
+
+                    if (params.ENVIRONMENT == "DEVELOPMENT") {
+
                         sh '''
                             set -e
-
-                            echo $ROOTPASS
-                            echo $SITE_DB_PASSWD
 
                             db_list=$(mysql -u root -p"$ROOTPASS" --silent --skip-column-names \
                                 -e "SHOW DATABASES LIKE 'osdag_db_jenkins_%';")
 
                             if [ -n "$db_list" ]; then
                                 while IFS= read -r db; do
-                                    suffix="${db#osdag_db_jenkins_}"
-                                    user="osdag_user_jenkins_$suffix"
-
                                     mysql -u root -p"$ROOTPASS" <<EOF
 DROP DATABASE IF EXISTS $db;
-DROP USER IF EXISTS '$user'@'localhost';
 EOF
                                 done <<< "$db_list"
-
                                 mysql -u root -p"$ROOTPASS" -e "FLUSH PRIVILEGES;"
                             fi
 
                             newdb="osdag_db_jenkins_${BUILD_NUMBER}"
-                            newuser="osdag_user_jenkins_4577"
 
                             mysql -u root -p"$ROOTPASS" <<EOF
 CREATE DATABASE IF NOT EXISTS $newdb;
-CREATE USER IF NOT EXISTS '$newuser'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
-GRANT ALL PRIVILEGES ON $newdb.* TO '$newuser'@'localhost';
+CREATE USER IF NOT EXISTS '$SITE_DB_USER'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
+GRANT ALL PRIVILEGES ON $newdb.* TO '$SITE_DB_USER'@'localhost';
 FLUSH PRIVILEGES;
 EOF
 
                             if [ -f "osdag_db/osdag_10.sql" ]; then
-                                rm -rf /tmp/osdag_clean.sql
-                                sed -e '/^CREATE DATABASE/d' -e '/^USE[[:space:]]/d' osdag_db/osdag_10.sql > /tmp/osdag_clean.sql
-                                mysql -u "$newuser" -p"$SITE_DB_PASSWD" "$newdb" < /tmp/osdag_clean.sql
+                                sed -e '/^CREATE DATABASE/d' -e '/^USE[[:space:]]/d' \
+                                    osdag_db/osdag_10.sql > /tmp/osdag_clean.sql
 
-                            else 
-                                echo 'No file osdag_10.sql found'
+                                mysql -u "$SITE_DB_USER" -p"$SITE_DB_PASSWD" "$newdb" < /tmp/osdag_clean.sql
                             fi
                         '''
                     }
-                }
-            }
-        }
 
-        stage('Mount Volume') { 
-            steps { 
-                script { 
-                    sh "git config --global --add safe.directory ${WORKSPACE}/osdag_repo"
-                    
-                    def commitMsg = sh(
-                        script: "git -C ${WORKSPACE}/osdag_repo log -1 --pretty=%B",
-                        returnStdout: true
-                    ).trim()
-
-                    if (!commitMsg.toLowerCase().contains("build clean")) {
-                        echo "Reusing old uploads folder (osdag_uploads and osdag_public)"
-                    } 
                     else {
-                        echo "Recreating Podman Mount directory"
+
                         sh '''
-                            mv /var/lib/jenkins/site_directories/osdag_uploads /var/lib/jenkins/site_directories/osdag_uploads.${BUILD_NUMBER}
-                            mv /var/lib/jenkins/site_directories/osdag_public /var/lib/jenkins/site_directories/osdag_public.${BUILD_NUMBER}
-                            mkdir -p /var/lib/jenkins/site_directories/osdag_uploads
-                            mkdir -p /var/lib/jenkins/site_directories/osdag_public
+                            set -e
+
+                            prod_db="osdag_db_jenkins_${BUILD_NUMBER}"
+
+                            exists=$(mysql -u root -p"$ROOTPASS" --silent --skip-column-names \
+                                -e "SHOW DATABASES LIKE '$prod_db';")
+
+                            if [ -z "$exists" ]; then
+                                mysql -u root -p"$ROOTPASS" <<EOF
+CREATE DATABASE $prod_db;
+CREATE USER IF NOT EXISTS '$SITE_DB_USER'@'localhost' IDENTIFIED BY '$SITE_DB_PASSWD';
+GRANT ALL PRIVILEGES ON $prod_db.* TO '$SITE_DB_USER'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+
+                                if [ -f "osdag_db/osdag_10.sql" ]; then
+                                    sed -e '/^CREATE DATABASE/d' -e '/^USE[[:space:]]/d' \
+                                        osdag_db/osdag_10.sql > /tmp/osdag_clean.sql
+
+                                    mysql -u "$SITE_DB_USER" -p"$SITE_DB_PASSWD" "$prod_db" < /tmp/osdag_clean.sql
+                                fi
+                            fi
                         '''
                     }
+
                 }
             }
         }
-
         stage ('Fetch Dockerfile') {
             steps {
                 dir('dockerfile_only') {
@@ -149,7 +159,6 @@ EOF
                 }
             }
         }
-
         stage ('Build Image') {
             steps {
                 sh 'podman image ls --format "{{.Repository}}" | grep "^osdag" | xargs -r podman image rm'
@@ -164,21 +173,11 @@ EOF
                 """
             }
         }
-
         stage('Podman Secrets') {
             steps {
                 script {
-                    sh "git config --global --add safe.directory ${WORKSPACE}/osdag_repo"
 
-                    def commitMsg = sh(
-                        script: "git -C ${WORKSPACE}/osdag_repo log -1 --pretty=%B",
-                        returnStdout: true
-                    ).trim()
-
-                    if (!commitMsg.toLowerCase().contains("build clean")) {
-                        echo "Reusing latest secrets"
-                    }
-                    else {
+                    if (params.ENVIRONMENT == "DEVELOPMENT") {
                         sh """
                             set -e
 
@@ -189,10 +188,23 @@ EOF
                             printf "${SITE_DB_PASSWD}" | podman secret create osdag_mysql_password -
                         """
                     }
+
+                    else {
+                        sh """
+                            set -e
+
+                            if ! podman secret inspect osdag_mysql_db >/dev/null 2>&1; then
+                                printf "osdag_db_production" | podman secret create osdag_mysql_db -
+                            fi
+
+                            if ! podman secret inspect osdag_mysql_password >/dev/null 2>&1; then
+                                printf "${SITE_DB_PASSWD}" | podman secret create osdag_mysql_password -
+                            fi
+                        """
+                    }
                 }
             }
         }
-
         stage ('Podman SystemD generator') {
             steps {
                 script {
@@ -247,7 +259,6 @@ EOF
                 }
             }
         }
-
         stage('Mail enable') {
             steps {
                 sh '''
@@ -257,6 +268,15 @@ EOF
                     podman exec osdag_container sh -c 'echo "mailhub=10.0.2.2:25" > /etc/ssmtp/ssmtp.conf'
                     podman exec osdag_container sh -c 'echo "root:root@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases'
                     podman exec osdag_container sh -c 'echo "'${ENV_USR}':'${ENV_USR}'@fossee.org.in:10.0.2.2:25" >> /etc/ssmtp/revaliases'
+                '''
+            }
+        }
+        stage('Set Permissions') {
+            steps {
+                sh '''
+                    podman exec osdag_container sh -c 'curl -s https://static.fossee.in/IT/drupal_fix_permissions.sh | bash -s -- -u="osdag_user_jenkins_4577"'
+                    podman exec osdag_container sh -c 'chown -R root:www-data /opt/drupal/sites/default/files'
+                    podman exec osdag_container sh -c 'chown -R root:www-data /opt/drupal/osdag_uploads'
                 '''
             }
         }
