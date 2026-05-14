@@ -14,6 +14,7 @@ RUN apt update && \
 
 COPY ${REPO_DIR}/ .
 
-RUN ln -s /opt/drupal /var/www/html
+RUN ln -s /opt/drupal /var/www/html && \
+    composer install --no-cache --no-dev --no-interaction --no-progress
 
 EXPOSE 80
