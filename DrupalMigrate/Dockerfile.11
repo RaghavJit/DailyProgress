@@ -9,11 +9,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt update && \
     apt install -y git unzip && \
-    adduser --disabled-password --gecos "" ${ENV_USR}
+    adduser --disabled-password --gecos "" ${ENV_USR} && \
+    unlink /var/www/html
 
-COPY ${REPO_DIR}/web web
-COPY ${REPO_DIR}/composer.lock ${REPO_DIR}/composer.json .
+COPY ${REPO_DIR}/ .
 
-RUN composer update
+RUN ln -s /opt/drupal /var/www/html
 
 EXPOSE 80
