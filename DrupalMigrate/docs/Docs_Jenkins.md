@@ -1,6 +1,7 @@
 # Jenkins Groovy Script Explained
 
 ## Additional Docs
+1. [Steps to make a pipeline](./Docs_JenkinsPipeline.md)
 1. [Jenkins Troubleshooting](./Docs_JenkinsAdditional.md#future-scope-and-limitations)
 2. [Future scope and limitations](./Docs_JenkinsAdditional.md#jenkins-troubleshooting)
 3. [Jenkins User accounts configuration](./Docs_JenkinsAdditional.md#jenkins-user-accounts-configuration)
@@ -74,7 +75,11 @@ Defining parameters directly in the script is important because relying on the J
 
 When a new build happens, the image is built from the repository. If the repository’s sites/default/files directory does not include the new content uploaded by developers, that content gets wiped out, and only whatever exists in arduino_public becomes visible inside the container after the mount. Therefore, to preserve developer-uploaded content, that data must be copied out to the mounted folder before the next build. This ensures that the mounted directory remains the correct source of truth, and no uploaded content disappears simply because the repository had an older or empty version of the folder.
 
+Default value of UPDATE_PUBLIC will be mentioned under ``defaultValue:``
+
 **ENVIRONMENT**: When value of this variable is DEVELOPMENT the database and secrets are deleted and created again, otherwise we just reuse them from previous build. We did this because in development phase the content might get updated from developer side via SQL dumps (which we pull and use) but in production mode developers promise to stop making changes, and only the server side database is assumed to be latest, so developer's SQL dump is no longer used, as it may not be the latest.
+
+Default value of ENVRIONMENT variable: The first value in the ``choices`` array is the default value.
 
 ```
 parameters {
