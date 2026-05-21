@@ -148,13 +148,14 @@ EOF
             steps {
                 dir('dockerfile_only') {
                     sh """
-                        rm -rf .git
-                        git init
-                        git remote add origin https://github.com/RaghavJit/DailyProgress
-                        git config core.sparseCheckout true
-                        echo "DrupalMigrate/Dockerfile" > .git/info/sparse-checkout
-                        git pull origin automated --depth=1
-                        cp DrupalMigrate/Dockerfile "${WORKSPACE}/Dockerfile"
+                    rm -rf .git
+                    git init
+                    git remote add origin https://github.com/FOSSEE-DevOps/RaghavDocumentation
+                    git config core.sparseCheckout true
+                    mkdir -p .git/info
+                    echo "DrupalMigrate/files/Docker/10/Dockerfile" > .git/info/sparse-checkout
+                    git pull origin master --depth=1
+                    cp -r DrupalMigrate/files/Docker/10/Dockerfile "${WORKSPACE}/Dockerfile"
                     """
                 }
             }
