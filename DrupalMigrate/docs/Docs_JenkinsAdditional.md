@@ -40,19 +40,20 @@ Common errors during site building (Stage vise)
 2. The database troubleshooting step as discussed [here](../Task.md#troubleshooting)
 
 ### Stage - Fetch Dockerfile [7/12]
-1. Incorrect Dockerfile used, if you are using Dockerfile for v10 leave the block as it is, othervise change it to the following:
+1. Incorrect Dockerfile used, if you are using Dockerfile for v10 leave the block as it is, othervise change it to the following (path becomes Docker/11 instead of Docker/10):
 ```
 stage ('Fetch Dockerfile') {
     steps {
         dir('dockerfile_only') {
             sh """
-                rm -rf .git
-                git init
-                git remote add origin https://github.com/RaghavJit/DailyProgress
-                git config core.sparseCheckout true
-                echo "DrupalMigrate/Dockerfile.11" > .git/info/sparse-checkout
-                git pull origin automated --depth=1
-                cp DrupalMigrate/Dockerfile.11 "${WORKSPACE}/Dockerfile"
+                    rm -rf .git
+                    git init
+                    git remote add origin https://github.com/FOSSEE-DevOps/RaghavDocumentation
+                    git config core.sparseCheckout true
+                    mkdir -p .git/info
+                    echo "DrupalMigrate/files/Docker/11/Dockerfile" > .git/info/sparse-checkout
+                    git pull origin master --depth=1
+                    cp -r DrupalMigrate/files/Docker/11/Dockerfile "${WORKSPACE}/Dockerfile"
             """
         }
     }

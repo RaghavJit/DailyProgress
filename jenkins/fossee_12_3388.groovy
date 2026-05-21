@@ -153,9 +153,9 @@ EOF
                     git remote add origin https://github.com/FOSSEE-DevOps/RaghavDocumentation
                     git config core.sparseCheckout true
                     mkdir -p .git/info
-                    echo "DrupalMigrate/files/Docker/10/Dockerfile" > .git/info/sparse-checkout
+                    echo "DrupalMigrate/files/Docker/11/Dockerfile" > .git/info/sparse-checkout
                     git pull origin master --depth=1
-                    cp -r DrupalMigrate/files/Docker/10/Dockerfile "${WORKSPACE}/Dockerfile"
+                    cp -r DrupalMigrate/files/Docker/11/Dockerfile "${WORKSPACE}/Dockerfile"
                     """
                 }
             }

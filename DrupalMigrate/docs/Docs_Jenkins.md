@@ -245,19 +245,20 @@ EOF
 ```
 
 ### Stage - Fetch Dockerfile [7/12]
-In this step we clone the Dockerfile we need for building, we only clone the Dockerfile and not the entire repo. In this case we are donwloading Dockerfile, but if we are using Dockerfile.11 if we are building for drupal 11. To do this replace Dockerfile with Dockerfile.11 in all places except for the last instant. [See here](./Docs_JenkinsAdditional.md#stage---fetch-dockerfile-712)
+In this step we clone the Dockerfile we need for building, we only clone the Dockerfile and not the entire repo. In this case we are donwloading Dockerfile for version 10, hence the path is ``Docker/10`` if we are building for drupal 11 path will be ``Docker/11``. To do this replace Dockerfile with Dockerfile.11 in all places except for the last instant. [See here](./Docs_JenkinsAdditional.md#stage---fetch-dockerfile-712)
 ```
 stage ('Fetch Dockerfile') {
     steps {
         dir('dockerfile_only') {
             sh """
-                rm -rf .git
-                git init
-                git remote add origin https://github.com/RaghavJit/DailyProgress
-                git config core.sparseCheckout true
-                echo "DrupalMigrate/Dockerfile" > .git/info/sparse-checkout
-                git pull origin automated --depth=1
-                cp DrupalMigrate/Dockerfile "${WORKSPACE}/Dockerfile"
+                    rm -rf .git
+                    git init
+                    git remote add origin https://github.com/FOSSEE-DevOps/RaghavDocumentation
+                    git config core.sparseCheckout true
+                    mkdir -p .git/info
+                    echo "DrupalMigrate/files/Docker/10/Dockerfile" > .git/info/sparse-checkout
+                    git pull origin master --depth=1
+                    cp -r DrupalMigrate/files/Docker/10/Dockerfile "${WORKSPACE}/Dockerfile"
             """
         }
     }
