@@ -94,7 +94,7 @@ Import the *db-dump* to *database*
 mysql -u "<db-user>" -p"<site-db-pass>" "<database>" < <db-dump>
 ```
 
-2. Build the docker image with Dockerfile, there are two dockerfiles [Dockerfile](./files/Dockerfile) for v10 and [Dockerfile.11](./files/Dockerfile.11) for v11. To build the image run the following commadn in *site-repo*, the Dockerfile should be present in the same directory.
+2. Build the docker image with Dockerfile, there are two dockerfiles [Dockerfile](./files/Docker/10/Dockerfile) for v10 and [Dockerfile.11](./files/Docker/11/Dockerfile) for v11. To build the image run the following commadn in *site-repo*, the Dockerfile should be present in the same directory.
 
 ```
 podman build \
