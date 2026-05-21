@@ -69,7 +69,7 @@ pipeline {
                 dir('cfd_db') {
                     checkout scmGit(
                         branches: [[name: '*/main']],
-                        userRemoteConfigs: [[ credentialsId: 'cfd', url: 'https://github.com/RaghavJit/cfd_db' ]]
+                        userRemoteConfigs: [[ credentialsId: 'jenkins_token', url: 'https://github.com/FOSSEE-DevOps/cfd_db' ]]
                     )
                 }
             }
@@ -150,7 +150,7 @@ EOF
                     sh """
                         rm -rf .git
                         git init
-                        git remote add origin https://github.com/RaghavJit/DailyProgress
+                        git remote add origin https://github.com/FOSSEE-DevOps/DailyProgress
                         git config core.sparseCheckout true
                         echo "DrupalMigrate/Dockerfile" > .git/info/sparse-checkout
                         git pull origin automated --depth=1

@@ -69,7 +69,7 @@ pipeline {
                 dir('osdag_db') {
                     checkout scmGit(
                         branches: [[name: '*/main']],
-                        userRemoteConfigs: [[ credentialsId: 'osdag', url: 'https://github.com/RaghavJit/osdag_db' ]]
+                        userRemoteConfigs: [[ credentialsId: 'jenkins_token', url: 'https://github.com/FOSSEE-DevOps/osdag_db' ]]
                     )
                 }
             }

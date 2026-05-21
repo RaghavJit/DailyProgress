@@ -69,7 +69,7 @@ pipeline {
                 dir('fossee_db') {
                     checkout scmGit(
                         branches: [[name: '*/main']],
-                        userRemoteConfigs: [[ credentialsId: 'fossee', url: 'https://github.com/RaghavJit/fossee_db' ]]
+                        userRemoteConfigs: [[ credentialsId: 'jenkins_token', url: 'https://github.com/FOSSEE-DevOps/fossee_db' ]]
                     )
                 }
             }
@@ -150,7 +150,7 @@ EOF
                     sh """
                         rm -rf .git
                         git init
-                        git remote add origin https://github.com/RaghavJit/DailyProgress
+                        git remote add origin https://github.com/FOSSEE-DevOps/DailyProgress
                         git config core.sparseCheckout true
                         echo "DrupalMigrate/Dockerfile.11" > .git/info/sparse-checkout
                         git pull origin automated --depth=1

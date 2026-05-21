@@ -69,7 +69,7 @@ pipeline {
                 dir('openplc_db') {
                     checkout scmGit(
                         branches: [[name: '*/main']],
-                        userRemoteConfigs: [[ credentialsId: 'openplc', url: 'https://github.com/RaghavJit/openplc_db' ]]
+                        userRemoteConfigs: [[ credentialsId: 'jenkins_token', url: 'https://github.com/FOSSEE-DevOps/openplc_db' ]]
                     )
                 }
             }
@@ -150,7 +150,7 @@ EOF
                     sh """
                         rm -rf .git
                         git init
-                        git remote add origin https://github.com/RaghavJit/DailyProgress
+                        git remote add origin https://github.com/FOSSEE-DevOps/DailyProgress
                         git config core.sparseCheckout true
                         echo "DrupalMigrate/Dockerfile" > .git/info/sparse-checkout
                         git pull origin automated --depth=1
